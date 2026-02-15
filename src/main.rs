@@ -3,6 +3,7 @@ use std::fs;
 use std::io;
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 use color_eyre::Result;
 use crossterm::{
@@ -735,6 +736,8 @@ impl IssueModal {
     }
 }
 
+const REFRESH_INTERVAL: Duration = Duration::from_secs(30);
+
 struct App {
     screen: Screen,
     repo_select: RepoSelectState,
@@ -749,6 +752,7 @@ struct App {
     issue_modal: Option<IssueModal>,
     confirm_modal: Option<ConfirmModal>,
     status_message: Option<String>,
+    last_refresh: Instant,
 }
 
 impl App {
@@ -767,6 +771,7 @@ impl App {
             confirm_modal: None,
             status_message: None,
             sessions: Vec::new(),
+            last_refresh: Instant::now(),
         }
     }
 }
@@ -821,6 +826,15 @@ impl App {
         }
     }
 
+    fn refresh_data(&mut self) {
+        self.issues = fetch_issues(&self.repo);
+        self.pull_requests = fetch_prs(&self.repo);
+        self.worktrees = fetch_worktrees();
+        self.sessions = fetch_sessions();
+        self.clamp_selected();
+        self.last_refresh = Instant::now();
+    }
+
     fn enter_repo_select(&mut self) {
         let owner = if self.repo.contains('/') {
             self.repo.split('/').next().unwrap_or("").to_string()
@@ -845,10 +859,7 @@ fn main() -> Result<()> {
     if let Some(config) = load_config() {
         if !config.repo.is_empty() {
             app.repo = config.repo.clone();
-            app.issues = fetch_issues(&config.repo);
-            app.pull_requests = fetch_prs(&config.repo);
-            app.worktrees = fetch_worktrees();
-            app.sessions = fetch_sessions();
+            app.refresh_data();
             app.selected_card = [0; 4];
             app.screen = Screen::Board;
         }
@@ -859,6 +870,27 @@ fn main() -> Result<()> {
             Screen::RepoSelect => ui_repo_select(frame, &app.repo_select),
             Screen::Board => ui(frame, &app),
         })?;
+
+        // Auto-refresh when interval has elapsed and on Board screen in Normal mode
+        if app.screen == Screen::Board
+            && app.mode == Mode::Normal
+            && app.last_refresh.elapsed() >= REFRESH_INTERVAL
+        {
+            app.refresh_data();
+        }
+
+        // Poll for events with a timeout so we can check for auto-refresh
+        let poll_timeout = if app.screen == Screen::Board && app.mode == Mode::Normal {
+            REFRESH_INTERVAL
+                .checked_sub(app.last_refresh.elapsed())
+                .unwrap_or(Duration::from_millis(100))
+        } else {
+            Duration::from_secs(60)
+        };
+
+        if !event::poll(poll_timeout)? {
+            continue;
+        }
 
         if let Event::Key(key) = event::read()? {
             if key.kind != KeyEventKind::Press {
@@ -925,12 +957,9 @@ fn main() -> Result<()> {
                                 {
                                     let repo = repo.clone();
                                     let _ = save_config(&repo);
-                                    app.issues = fetch_issues(&repo);
-                                    app.pull_requests = fetch_prs(&repo);
-                                    app.worktrees = fetch_worktrees();
-                                    app.sessions = fetch_sessions();
-                                    app.selected_card = [0; 4];
                                     app.repo = repo;
+                                    app.refresh_data();
+                                    app.selected_card = [0; 4];
                                     app.screen = Screen::Board;
                                 }
                             }
@@ -1003,6 +1032,10 @@ fn main() -> Result<()> {
                                 KeyCode::BackTab => {
                                     app.active_section = (app.active_section + 3) % 4;
                                 }
+                                KeyCode::Char('R') => {
+                                    app.refresh_data();
+                                    app.status_message = Some("Refreshed".to_string());
+                                }
                                 KeyCode::Char('/') => {
                                     app.mode = Mode::Filtering {
                                         query: String::new(),
@@ -1030,6 +1063,7 @@ fn main() -> Result<()> {
                                                         app.worktrees = fetch_worktrees();
                                                         app.sessions = fetch_sessions();
                                                         app.clamp_selected();
+                                                        app.last_refresh = Instant::now();
                                                         app.status_message = Some(format!(
                                                             "Created worktree and session for issue #{}",
                                                             number
@@ -1113,6 +1147,7 @@ fn main() -> Result<()> {
                                                     Ok(o) if o.status.success() => {
                                                         app.pull_requests = fetch_prs(&repo);
                                                         app.clamp_selected();
+                                                        app.last_refresh = Instant::now();
                                                         app.status_message = Some(format!(
                                                             "PR #{} marked as ready",
                                                             number
@@ -1163,10 +1198,8 @@ fn main() -> Result<()> {
                                         enable_raw_mode()?;
                                         io::stdout().execute(EnterAlternateScreen)?;
                                         terminal.clear()?;
-                                        // Refresh state after returning
-                                        app.sessions = fetch_sessions();
-                                        app.worktrees = fetch_worktrees();
-                                        app.clamp_selected();
+                                        // Refresh all state after returning (Claude may have created PRs)
+                                        app.refresh_data();
                                     }
                                 }
                                 KeyCode::Up | KeyCode::Char('k') => {
@@ -1188,6 +1221,7 @@ fn main() -> Result<()> {
                                                 Ok(()) => {
                                                     app.issues = fetch_issues(&repo);
                                                     app.clamp_selected();
+                                                    app.last_refresh = Instant::now();
                                                     app.status_message =
                                                         Some(format!("Closed issue #{}", number));
                                                 }
@@ -1203,6 +1237,7 @@ fn main() -> Result<()> {
                                                     app.worktrees = fetch_worktrees();
                                                     app.sessions = fetch_sessions();
                                                     app.clamp_selected();
+                                                    app.last_refresh = Instant::now();
                                                     app.status_message = Some(format!(
                                                         "Removed worktree '{}'",
                                                         branch
@@ -1222,6 +1257,7 @@ fn main() -> Result<()> {
                                                 Ok(o) if o.status.success() => {
                                                     app.sessions = fetch_sessions();
                                                     app.clamp_selected();
+                                                    app.last_refresh = Instant::now();
                                                     app.status_message =
                                                         Some(format!("Killed session '{}'", name));
                                                 }
@@ -1272,6 +1308,7 @@ fn main() -> Result<()> {
                                                 Ok(()) => {
                                                     app.issues = fetch_issues(&app.repo);
                                                     app.clamp_selected();
+                                                    app.last_refresh = Instant::now();
                                                     app.issue_modal = None;
                                                     app.mode = Mode::Normal;
                                                 }
@@ -1641,6 +1678,8 @@ fn ui(frame: &mut Frame, app: &App) {
                 Span::styled(" Filter ", desc_style),
                 Span::styled(" Enter ", key_style),
                 Span::styled(" Change repo ", desc_style),
+                Span::styled(" R ", key_style),
+                Span::styled(" Refresh ", desc_style),
             ];
             if app.active_section == 0 {
                 spans.push(Span::styled(" n ", key_accent));
