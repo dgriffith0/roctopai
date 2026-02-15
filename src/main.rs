@@ -1002,11 +1002,13 @@ fn main() -> Result<()> {
             app.refresh_data();
         }
 
-        // Poll for events with a timeout so we can check for auto-refresh
+        // Poll for events with a short timeout so the refresh timer updates every second
         let poll_timeout = if app.screen == Screen::Board && app.mode == Mode::Normal {
-            REFRESH_INTERVAL
+            let remaining = REFRESH_INTERVAL
                 .checked_sub(app.last_refresh.elapsed())
-                .unwrap_or(Duration::from_millis(100))
+                .unwrap_or(Duration::ZERO);
+            // Cap at 1 second so the countdown timer display stays current
+            remaining.min(Duration::from_secs(1))
         } else {
             Duration::from_secs(60)
         };
@@ -1875,8 +1877,31 @@ fn ui(frame: &mut Frame, app: &App) {
     };
     legend_spans.extend(mode_spans);
 
+    // Split bottom bar: legend on the left, refresh timer on the right
+    let bottom = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(0), Constraint::Length(14)])
+        .split(outer[2]);
+
     let legend = Paragraph::new(Line::from(legend_spans));
-    frame.render_widget(legend, outer[2]);
+    frame.render_widget(legend, bottom[0]);
+
+    // Refresh countdown timer
+    let remaining = REFRESH_INTERVAL
+        .checked_sub(app.last_refresh.elapsed())
+        .unwrap_or(Duration::ZERO);
+    let secs = remaining.as_secs();
+    let timer_text = format!(" ⏱ {}s ", secs);
+    let timer_style = if secs <= 5 {
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let timer = Paragraph::new(Line::from(Span::styled(timer_text, timer_style)))
+        .alignment(ratatui::layout::Alignment::Right);
+    frame.render_widget(timer, bottom[1]);
 
     // Render issue modal overlay if open
     if let Some(modal) = &app.issue_modal {
