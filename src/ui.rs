@@ -204,7 +204,7 @@ pub fn ui_repo_select(frame: &mut Frame, state: &RepoSelectState) {
             let hint_idx = 3 + visible_count;
             if hint_idx < chunks.len() {
                 let hint = Paragraph::new(Line::from(vec![Span::styled(
-                    "↑/↓ navigate  Enter select  Esc back",
+                    "j/k ↑/↓ navigate  Enter select  Esc back",
                     Style::default().fg(Color::DarkGray),
                 )]));
                 frame.render_widget(hint, chunks[hint_idx]);
@@ -327,9 +327,9 @@ pub fn ui(frame: &mut Frame, app: &App) {
             vec![
                 Span::styled(" q/Esc ", key_style),
                 Span::styled(" Quit ", desc_style),
-                Span::styled(" Tab/S-Tab ", key_style),
+                Span::styled(" h/l Tab/S-Tab ", key_style),
                 Span::styled(" Switch column ", desc_style),
-                Span::styled(" ↑/↓ ", key_style),
+                Span::styled(" j/k ↑/↓ ", key_style),
                 Span::styled(" Navigate ", desc_style),
                 Span::styled(" / ", key_style),
                 Span::styled(" Filter ", desc_style),
