@@ -2237,7 +2237,7 @@ fn ui(frame: &mut Frame, app: &App) {
         .constraints([
             Constraint::Length(3),
             Constraint::Min(0),
-            Constraint::Length(1),
+            Constraint::Length(2),
         ])
         .split(frame.area());
 
@@ -2315,7 +2315,7 @@ fn ui(frame: &mut Frame, app: &App) {
         );
     }
 
-    // Bottom legend bar
+    // Bottom legend bar (two lines: global on top, area-specific on bottom)
     let key_style = Style::default()
         .fg(Color::White)
         .bg(Color::Rgb(60, 60, 60))
@@ -2326,22 +2326,23 @@ fn ui(frame: &mut Frame, app: &App) {
         .bg(Color::Green)
         .add_modifier(Modifier::BOLD);
 
-    let mut legend_spans: Vec<Span> = Vec::new();
+    // Top line: global actions (or mode-specific actions for non-Normal modes)
+    let mut global_spans: Vec<Span> = Vec::new();
 
     // Status message prefix
     if let Some(msg) = &app.status_message {
-        legend_spans.push(Span::styled(
+        global_spans.push(Span::styled(
             format!(" {} ", msg),
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         ));
-        legend_spans.push(Span::styled(" | ", desc_style));
+        global_spans.push(Span::styled(" | ", desc_style));
     }
 
-    let mode_spans: Vec<Span> = match &app.mode {
+    let global_mode_spans: Vec<Span> = match &app.mode {
         Mode::Normal => {
-            let mut spans = vec![
+            vec![
                 Span::styled(" q/Esc ", key_style),
                 Span::styled(" Quit ", desc_style),
                 Span::styled(" Tab/S-Tab ", key_style),
@@ -2354,44 +2355,7 @@ fn ui(frame: &mut Frame, app: &App) {
                 Span::styled(" Change repo ", desc_style),
                 Span::styled(" R ", key_style),
                 Span::styled(" Refresh ", desc_style),
-            ];
-            if app.active_section == 0 {
-                spans.push(Span::styled(" n ", key_accent));
-                spans.push(Span::styled(" New issue ", desc_style));
-                spans.push(Span::styled(" w ", key_accent));
-                spans.push(Span::styled(" Worktree+Claude ", desc_style));
-                spans.push(Span::styled(" d ", key_style));
-                spans.push(Span::styled(" Close issue ", desc_style));
-                spans.push(Span::styled(" s ", key_style));
-                spans.push(Span::styled(" Open/Closed ", desc_style));
-                spans.push(Span::styled(" m ", key_style));
-                spans.push(Span::styled(" Assigned to me ", desc_style));
-            }
-            if app.active_section == 1 {
-                spans.push(Span::styled(" d ", key_style));
-                spans.push(Span::styled(" Remove worktree ", desc_style));
-            }
-            if app.active_section == 2 {
-                spans.push(Span::styled(" a ", key_accent));
-                spans.push(Span::styled(" Attach session ", desc_style));
-                spans.push(Span::styled(" d ", key_style));
-                spans.push(Span::styled(" Kill session ", desc_style));
-            }
-            if app.active_section == 3 {
-                spans.push(Span::styled(" o ", key_accent));
-                spans.push(Span::styled(" Open in browser ", desc_style));
-                spans.push(Span::styled(" r ", key_accent));
-                spans.push(Span::styled(" Mark ready ", desc_style));
-                spans.push(Span::styled(" M ", key_accent));
-                spans.push(Span::styled(" Merge ", desc_style));
-                spans.push(Span::styled(" V ", key_accent));
-                spans.push(Span::styled(" Revert ", desc_style));
-                spans.push(Span::styled(" s ", key_style));
-                spans.push(Span::styled(" Open/Closed ", desc_style));
-                spans.push(Span::styled(" m ", key_style));
-                spans.push(Span::styled(" Assigned to me ", desc_style));
-            }
-            spans
+            ]
         }
         Mode::Filtering { .. } => vec![
             Span::styled(" Esc ", key_style),
@@ -2424,16 +2388,78 @@ fn ui(frame: &mut Frame, app: &App) {
             Span::styled(" Cancel ", desc_style),
         ],
     };
-    legend_spans.extend(mode_spans);
+    global_spans.extend(global_mode_spans);
 
-    // Split bottom bar: legend on the left, refresh timer on the right
-    let bottom = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(0), Constraint::Length(14)])
+    // Bottom line: area-specific actions
+    let section_names = ["Issues", "Worktrees", "Sessions", "Pull Requests"];
+    let section_colors = [Color::Red, Color::Yellow, Color::Blue, Color::Magenta];
+    let mut area_spans: Vec<Span> = Vec::new();
+
+    if matches!(app.mode, Mode::Normal) {
+        let section_label_style = Style::default()
+            .fg(section_colors[app.active_section])
+            .add_modifier(Modifier::BOLD);
+        area_spans.push(Span::styled(
+            format!(" {} ", section_names[app.active_section]),
+            section_label_style,
+        ));
+        area_spans.push(Span::styled("│ ", desc_style));
+
+        match app.active_section {
+            0 => {
+                area_spans.push(Span::styled(" n ", key_accent));
+                area_spans.push(Span::styled(" New issue ", desc_style));
+                area_spans.push(Span::styled(" w ", key_accent));
+                area_spans.push(Span::styled(" Worktree+Claude ", desc_style));
+                area_spans.push(Span::styled(" d ", key_style));
+                area_spans.push(Span::styled(" Close issue ", desc_style));
+                area_spans.push(Span::styled(" s ", key_style));
+                area_spans.push(Span::styled(" Open/Closed ", desc_style));
+                area_spans.push(Span::styled(" m ", key_style));
+                area_spans.push(Span::styled(" Assigned to me ", desc_style));
+            }
+            1 => {
+                area_spans.push(Span::styled(" d ", key_style));
+                area_spans.push(Span::styled(" Remove worktree ", desc_style));
+            }
+            2 => {
+                area_spans.push(Span::styled(" a ", key_accent));
+                area_spans.push(Span::styled(" Attach session ", desc_style));
+                area_spans.push(Span::styled(" d ", key_style));
+                area_spans.push(Span::styled(" Kill session ", desc_style));
+            }
+            3 => {
+                area_spans.push(Span::styled(" o ", key_accent));
+                area_spans.push(Span::styled(" Open in browser ", desc_style));
+                area_spans.push(Span::styled(" r ", key_accent));
+                area_spans.push(Span::styled(" Mark ready ", desc_style));
+                area_spans.push(Span::styled(" M ", key_accent));
+                area_spans.push(Span::styled(" Merge ", desc_style));
+                area_spans.push(Span::styled(" V ", key_accent));
+                area_spans.push(Span::styled(" Revert ", desc_style));
+                area_spans.push(Span::styled(" s ", key_style));
+                area_spans.push(Span::styled(" Open/Closed ", desc_style));
+                area_spans.push(Span::styled(" m ", key_style));
+                area_spans.push(Span::styled(" Assigned to me ", desc_style));
+            }
+            _ => {}
+        }
+    }
+
+    // Split bottom area into two rows
+    let bottom_rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Length(1)])
         .split(outer[2]);
 
-    let legend = Paragraph::new(Line::from(legend_spans));
-    frame.render_widget(legend, bottom[0]);
+    // Top row: global actions with timer on right
+    let top_bottom = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(0), Constraint::Length(14)])
+        .split(bottom_rows[0]);
+
+    let global_legend = Paragraph::new(Line::from(global_spans));
+    frame.render_widget(global_legend, top_bottom[0]);
 
     // Refresh countdown timer
     let remaining = REFRESH_INTERVAL
@@ -2450,7 +2476,11 @@ fn ui(frame: &mut Frame, app: &App) {
     };
     let timer = Paragraph::new(Line::from(Span::styled(timer_text, timer_style)))
         .alignment(ratatui::layout::Alignment::Right);
-    frame.render_widget(timer, bottom[1]);
+    frame.render_widget(timer, top_bottom[1]);
+
+    // Bottom row: area-specific actions
+    let area_legend = Paragraph::new(Line::from(area_spans));
+    frame.render_widget(area_legend, bottom_rows[1]);
 
     // Render issue modal overlay if open
     if let Some(modal) = &app.issue_modal {
