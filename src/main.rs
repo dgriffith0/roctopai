@@ -3,6 +3,7 @@ use std::fs;
 use std::io;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use color_eyre::Result;
@@ -863,6 +864,7 @@ struct IssueModal {
     body: String,
     active_field: usize, // 0 = title, 1 = body
     error: Option<String>,
+    submitting: bool,
 }
 
 impl IssueModal {
@@ -872,8 +874,17 @@ impl IssueModal {
             body: String::new(),
             active_field: 0,
             error: None,
+            submitting: false,
         }
     }
+}
+
+enum IssueSubmitResult {
+    Success {
+        number: u64,
+        worktree_result: std::result::Result<(), String>,
+    },
+    Error(String),
 }
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(30);
@@ -898,6 +909,8 @@ struct App {
     pr_state_filter: StateFilter,
     pr_assignee_filter: AssigneeFilter,
     merge_pr_number: Option<u64>,
+    issue_submit_rx: Option<mpsc::Receiver<IssueSubmitResult>>,
+    spinner_tick: usize,
 }
 
 impl App {
@@ -922,6 +935,8 @@ impl App {
             pr_state_filter: StateFilter::Open,
             pr_assignee_filter: AssigneeFilter::All,
             merge_pr_number: None,
+            issue_submit_rx: None,
+            spinner_tick: 0,
         }
     }
 }
@@ -1072,8 +1087,63 @@ fn main() -> Result<()> {
             app.refresh_data();
         }
 
+        // Check for issue submission results from background thread
+        if let Some(rx) = &app.issue_submit_rx {
+            if let Ok(result) = rx.try_recv() {
+                app.issue_submit_rx = None;
+                match result {
+                    IssueSubmitResult::Success {
+                        number,
+                        worktree_result,
+                        ..
+                    } => {
+                        app.issues = fetch_issues(
+                            &app.repo,
+                            app.issue_state_filter,
+                            app.issue_assignee_filter,
+                        );
+                        app.clamp_selected();
+                        app.last_refresh = Instant::now();
+                        app.issue_modal = None;
+                        app.mode = Mode::Normal;
+                        match worktree_result {
+                            Ok(()) => {
+                                app.worktrees = fetch_worktrees();
+                                app.sessions = fetch_sessions();
+                                app.clamp_selected();
+                                app.status_message = Some(format!(
+                                    "Created issue #{} with worktree and session",
+                                    number
+                                ));
+                            }
+                            Err(e) => {
+                                app.status_message = Some(format!(
+                                    "Created issue #{} but failed to create worktree: {}",
+                                    number, e
+                                ));
+                            }
+                        }
+                    }
+                    IssueSubmitResult::Error(e) => {
+                        if let Some(modal) = &mut app.issue_modal {
+                            modal.submitting = false;
+                            modal.error = Some(e);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Advance spinner tick when submitting
+        if app.issue_submit_rx.is_some() {
+            app.spinner_tick = app.spinner_tick.wrapping_add(1);
+        }
+
         // Poll for events with a short timeout so the refresh timer updates every second
-        let poll_timeout = if app.screen == Screen::Board && app.mode == Mode::Normal {
+        let poll_timeout = if app.issue_submit_rx.is_some() {
+            // Fast polling for spinner animation
+            Duration::from_millis(100)
+        } else if app.screen == Screen::Board && app.mode == Mode::Normal {
             let remaining = REFRESH_INTERVAL
                 .checked_sub(app.last_refresh.elapsed())
                 .unwrap_or(Duration::ZERO);
@@ -1611,8 +1681,13 @@ fn main() -> Result<()> {
                         },
                         Mode::CreatingIssue => {
                             if let Some(modal) = &mut app.issue_modal {
+                                // Block input while submitting (only allow Esc)
+                                if modal.submitting && key.code != KeyCode::Esc {
+                                    continue;
+                                }
                                 match key.code {
                                     KeyCode::Esc => {
+                                        app.issue_submit_rx = None;
                                         app.issue_modal = None;
                                         app.mode = Mode::Normal;
                                     }
@@ -1624,51 +1699,38 @@ fn main() -> Result<()> {
                                         modal.active_field = 1;
                                     }
                                     KeyCode::Char('s')
-                                        if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                                        if key.modifiers.contains(KeyModifiers::CONTROL)
+                                            && !modal.submitting =>
                                     {
                                         let title = modal.title.trim().to_string();
                                         if title.is_empty() {
                                             modal.error = Some("Title cannot be empty".to_string());
                                         } else {
+                                            modal.submitting = true;
+                                            modal.error = None;
                                             let body = modal.body.clone();
-                                            match create_issue(&app.repo, &title, &body) {
-                                                Ok(number) => {
-                                                    app.issues = fetch_issues(
-                                                        &app.repo,
-                                                        app.issue_state_filter,
-                                                        app.issue_assignee_filter,
-                                                    );
-                                                    app.clamp_selected();
-                                                    app.last_refresh = Instant::now();
-                                                    app.issue_modal = None;
-                                                    app.mode = Mode::Normal;
-
-                                                    // Automatically create worktree and session
-                                                    let repo = app.repo.clone();
-                                                    match create_worktree_and_session(
-                                                        &repo, number, &title, &body,
-                                                    ) {
-                                                        Ok(()) => {
-                                                            app.worktrees = fetch_worktrees();
-                                                            app.sessions = fetch_sessions();
-                                                            app.clamp_selected();
-                                                            app.status_message = Some(format!(
-                                                                "Created issue #{} with worktree and session",
-                                                                number
-                                                            ));
-                                                        }
-                                                        Err(e) => {
-                                                            app.status_message = Some(format!(
-                                                                "Created issue #{} but failed to create worktree: {}",
-                                                                number, e
-                                                            ));
-                                                        }
+                                            let repo = app.repo.clone();
+                                            let (tx, rx) = mpsc::channel();
+                                            app.issue_submit_rx = Some(rx);
+                                            std::thread::spawn(move || {
+                                                match create_issue(&repo, &title, &body) {
+                                                    Ok(number) => {
+                                                        let worktree_result =
+                                                            create_worktree_and_session(
+                                                                &repo, number, &title, &body,
+                                                            );
+                                                        let _ =
+                                                            tx.send(IssueSubmitResult::Success {
+                                                                number,
+                                                                worktree_result,
+                                                            });
+                                                    }
+                                                    Err(e) => {
+                                                        let _ =
+                                                            tx.send(IssueSubmitResult::Error(e));
                                                     }
                                                 }
-                                                Err(e) => {
-                                                    modal.error = Some(e);
-                                                }
-                                            }
+                                            });
                                         }
                                     }
                                     KeyCode::Backspace => {
@@ -2141,7 +2203,7 @@ fn ui(frame: &mut Frame, app: &App) {
 
     // Render issue modal overlay if open
     if let Some(modal) = &app.issue_modal {
-        ui_issue_modal(frame, modal);
+        ui_issue_modal(frame, modal, app.spinner_tick);
     }
 
     // Render confirm modal overlay if open
@@ -2176,7 +2238,9 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
         .split(vertical[1])[1]
 }
 
-fn ui_issue_modal(frame: &mut Frame, modal: &IssueModal) {
+const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+fn ui_issue_modal(frame: &mut Frame, modal: &IssueModal, spinner_tick: usize) {
     let area = centered_rect(50, 50, frame.area());
 
     frame.render_widget(Clear, area);
@@ -2195,20 +2259,23 @@ fn ui_issue_modal(frame: &mut Frame, modal: &IssueModal) {
     let inner = outer_block.inner(area);
     frame.render_widget(outer_block, area);
 
-    // Layout: title field (3), body field (remaining), error (1), hint (1)
+    // Layout: title field (3), body field (remaining), error/spinner (1), hint (1)
     let has_error = modal.error.is_some();
+    let has_status = has_error || modal.submitting;
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),                             // title input
-            Constraint::Min(3),                                // body input
-            Constraint::Length(if has_error { 1 } else { 0 }), // error
-            Constraint::Length(1),                             // hint
+            Constraint::Length(3),                              // title input
+            Constraint::Min(3),                                 // body input
+            Constraint::Length(if has_status { 1 } else { 0 }), // error or spinner
+            Constraint::Length(1),                              // hint
         ])
         .split(inner);
 
     // Title field
-    let title_border_style = if modal.active_field == 0 {
+    let title_style = if modal.submitting {
+        Style::default().fg(Color::DarkGray)
+    } else if modal.active_field == 0 {
         Style::default()
             .fg(Color::White)
             .add_modifier(Modifier::BOLD)
@@ -2217,11 +2284,18 @@ fn ui_issue_modal(frame: &mut Frame, modal: &IssueModal) {
     };
     let title_block = Block::default()
         .borders(Borders::ALL)
-        .border_style(title_border_style)
+        .border_style(title_style)
         .title(" Title ");
     let title_text = Paragraph::new(Line::from(vec![
-        Span::styled(&modal.title, Style::default().fg(Color::White)),
-        if modal.active_field == 0 {
+        Span::styled(
+            &modal.title,
+            Style::default().fg(if modal.submitting {
+                Color::DarkGray
+            } else {
+                Color::White
+            }),
+        ),
+        if modal.active_field == 0 && !modal.submitting {
             Span::styled("_", Style::default().fg(Color::Cyan))
         } else {
             Span::raw("")
@@ -2231,7 +2305,9 @@ fn ui_issue_modal(frame: &mut Frame, modal: &IssueModal) {
     frame.render_widget(title_text, chunks[0]);
 
     // Body field
-    let body_border_style = if modal.active_field == 1 {
+    let body_style = if modal.submitting {
+        Style::default().fg(Color::DarkGray)
+    } else if modal.active_field == 1 {
         Style::default()
             .fg(Color::White)
             .add_modifier(Modifier::BOLD)
@@ -2240,20 +2316,41 @@ fn ui_issue_modal(frame: &mut Frame, modal: &IssueModal) {
     };
     let body_block = Block::default()
         .borders(Borders::ALL)
-        .border_style(body_border_style)
+        .border_style(body_style)
         .title(" Body ");
     let mut body_text = modal.body.clone();
-    if modal.active_field == 1 {
+    if modal.active_field == 1 && !modal.submitting {
         body_text.push('_');
     }
     let body_paragraph = Paragraph::new(body_text)
-        .style(Style::default().fg(Color::White))
+        .style(Style::default().fg(if modal.submitting {
+            Color::DarkGray
+        } else {
+            Color::White
+        }))
         .block(body_block)
         .wrap(Wrap { trim: false });
     frame.render_widget(body_paragraph, chunks[1]);
 
-    // Error
-    if let Some(err) = &modal.error {
+    // Spinner or error
+    if modal.submitting {
+        let spinner = SPINNER_FRAMES[spinner_tick % SPINNER_FRAMES.len()];
+        let spinner_text = Paragraph::new(Line::from(vec![
+            Span::styled(
+                format!("{} ", spinner),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Creating issue...",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        frame.render_widget(spinner_text, chunks[2]);
+    } else if let Some(err) = &modal.error {
         let err_text = Paragraph::new(Line::from(vec![Span::styled(
             err.as_str(),
             Style::default().fg(Color::Red),
@@ -2262,8 +2359,13 @@ fn ui_issue_modal(frame: &mut Frame, modal: &IssueModal) {
     }
 
     // Hint
+    let hint_text = if modal.submitting {
+        "Esc: cancel"
+    } else {
+        "Tab: switch field | Ctrl+S: submit | Esc: cancel"
+    };
     let hint = Paragraph::new(Line::from(vec![Span::styled(
-        "Tab: switch field | Ctrl+S: submit | Esc: cancel",
+        hint_text,
         Style::default().fg(Color::DarkGray),
     )]));
     frame.render_widget(hint, chunks[3]);
