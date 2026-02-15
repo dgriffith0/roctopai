@@ -304,7 +304,7 @@ fn fetch_issues(repo: &str, state: StateFilter, assignee: AssigneeFilter) -> Vec
         Err(_) => return Vec::new(),
     };
 
-    issues
+    let mut cards: Vec<Card> = issues
         .into_iter()
         .map(|issue| {
             let number = issue["number"].as_u64().unwrap_or(0);
@@ -352,7 +352,10 @@ fn fetch_issues(repo: &str, state: StateFilter, assignee: AssigneeFilter) -> Vec
                 is_merged: None,
             }
         })
-        .collect()
+        .collect();
+    // Reverse to show oldest first (gh returns newest first)
+    cards.reverse();
+    cards
 }
 
 fn fetch_prs(repo: &str, state: StateFilter, assignee: AssigneeFilter) -> Vec<Card> {
@@ -385,7 +388,8 @@ fn fetch_prs(repo: &str, state: StateFilter, assignee: AssigneeFilter) -> Vec<Ca
         Err(_) => return Vec::new(),
     };
 
-    prs.into_iter()
+    let mut cards: Vec<Card> = prs
+        .into_iter()
         .map(|pr| {
             let number = pr["number"].as_u64().unwrap_or(0);
             let title = pr["title"].as_str().unwrap_or("").to_string();
@@ -430,7 +434,10 @@ fn fetch_prs(repo: &str, state: StateFilter, assignee: AssigneeFilter) -> Vec<Ca
                 is_merged: Some(is_merged),
             }
         })
-        .collect()
+        .collect();
+    // Reverse to show oldest first (gh returns newest first)
+    cards.reverse();
+    cards
 }
 
 fn create_issue(repo: &str, title: &str, body: &str) -> std::result::Result<u64, String> {
