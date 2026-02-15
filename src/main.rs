@@ -20,6 +20,50 @@ use ratatui::{
 };
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, PartialEq)]
+enum StateFilter {
+    Open,
+    Closed,
+}
+
+impl StateFilter {
+    fn toggle(self) -> Self {
+        match self {
+            StateFilter::Open => StateFilter::Closed,
+            StateFilter::Closed => StateFilter::Open,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            StateFilter::Open => "open",
+            StateFilter::Closed => "closed",
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum AssigneeFilter {
+    All,
+    Mine,
+}
+
+impl AssigneeFilter {
+    fn toggle(self) -> Self {
+        match self {
+            AssigneeFilter::All => AssigneeFilter::Mine,
+            AssigneeFilter::Mine => AssigneeFilter::All,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            AssigneeFilter::All => "all",
+            AssigneeFilter::Mine => "mine",
+        }
+    }
+}
+
 struct Card {
     id: String,
     title: String,
@@ -190,19 +234,24 @@ fn label_color(name: &str) -> Color {
     }
 }
 
-fn fetch_issues(repo: &str) -> Vec<Card> {
-    let output = Command::new("gh")
-        .args([
-            "issue",
-            "list",
-            "--repo",
-            repo,
-            "--json",
-            "number,title,body,labels",
-            "--limit",
-            "30",
-        ])
-        .output();
+fn fetch_issues(repo: &str, state: StateFilter, assignee: AssigneeFilter) -> Vec<Card> {
+    let mut args = vec![
+        "issue".to_string(),
+        "list".to_string(),
+        "--repo".to_string(),
+        repo.to_string(),
+        "--state".to_string(),
+        state.label().to_string(),
+        "--json".to_string(),
+        "number,title,body,labels".to_string(),
+        "--limit".to_string(),
+        "30".to_string(),
+    ];
+    if assignee == AssigneeFilter::Mine {
+        args.push("--assignee".to_string());
+        args.push("@me".to_string());
+    }
+    let output = Command::new("gh").args(&args).output();
 
     let output = match output {
         Ok(o) if o.status.success() => o,
@@ -265,19 +314,24 @@ fn fetch_issues(repo: &str) -> Vec<Card> {
         .collect()
 }
 
-fn fetch_prs(repo: &str) -> Vec<Card> {
-    let output = Command::new("gh")
-        .args([
-            "pr",
-            "list",
-            "--repo",
-            repo,
-            "--json",
-            "number,title,body,isDraft,url,headRefName,state",
-            "--limit",
-            "30",
-        ])
-        .output();
+fn fetch_prs(repo: &str, state: StateFilter, assignee: AssigneeFilter) -> Vec<Card> {
+    let mut args = vec![
+        "pr".to_string(),
+        "list".to_string(),
+        "--repo".to_string(),
+        repo.to_string(),
+        "--state".to_string(),
+        state.label().to_string(),
+        "--json".to_string(),
+        "number,title,body,isDraft,url,headRefName,state".to_string(),
+        "--limit".to_string(),
+        "30".to_string(),
+    ];
+    if assignee == AssigneeFilter::Mine {
+        args.push("--assignee".to_string());
+        args.push("@me".to_string());
+    }
+    let output = Command::new("gh").args(&args).output();
 
     let output = match output {
         Ok(o) if o.status.success() => o,
@@ -803,6 +857,10 @@ struct App {
     confirm_modal: Option<ConfirmModal>,
     status_message: Option<String>,
     last_refresh: Instant,
+    issue_state_filter: StateFilter,
+    issue_assignee_filter: AssigneeFilter,
+    pr_state_filter: StateFilter,
+    pr_assignee_filter: AssigneeFilter,
 }
 
 impl App {
@@ -822,6 +880,10 @@ impl App {
             status_message: None,
             sessions: Vec::new(),
             last_refresh: Instant::now(),
+            issue_state_filter: StateFilter::Open,
+            issue_assignee_filter: AssigneeFilter::All,
+            pr_state_filter: StateFilter::Open,
+            pr_assignee_filter: AssigneeFilter::All,
         }
     }
 }
@@ -907,8 +969,12 @@ impl App {
     }
 
     fn refresh_data(&mut self) {
-        self.issues = fetch_issues(&self.repo);
-        self.pull_requests = fetch_prs(&self.repo);
+        self.issues = fetch_issues(
+            &self.repo,
+            self.issue_state_filter,
+            self.issue_assignee_filter,
+        );
+        self.pull_requests = fetch_prs(&self.repo, self.pr_state_filter, self.pr_assignee_filter);
         self.worktrees = fetch_worktrees();
 
         // Clean up worktrees and sessions for merged PRs
@@ -1236,7 +1302,11 @@ fn main() -> Result<()> {
                                                     .output();
                                                 match output {
                                                     Ok(o) if o.status.success() => {
-                                                        app.pull_requests = fetch_prs(&repo);
+                                                        app.pull_requests = fetch_prs(
+                                                            &repo,
+                                                            app.pr_state_filter,
+                                                            app.pr_assignee_filter,
+                                                        );
                                                         app.clamp_selected();
                                                         app.last_refresh = Instant::now();
                                                         app.status_message = Some(format!(
@@ -1293,6 +1363,50 @@ fn main() -> Result<()> {
                                         app.refresh_data();
                                     }
                                 }
+                                // Filter toggles for Issues and Pull Requests
+                                KeyCode::Char('s')
+                                    if app.active_section == 0 || app.active_section == 3 =>
+                                {
+                                    if app.active_section == 0 {
+                                        app.issue_state_filter = app.issue_state_filter.toggle();
+                                        app.issues = fetch_issues(
+                                            &app.repo,
+                                            app.issue_state_filter,
+                                            app.issue_assignee_filter,
+                                        );
+                                    } else {
+                                        app.pr_state_filter = app.pr_state_filter.toggle();
+                                        app.pull_requests = fetch_prs(
+                                            &app.repo,
+                                            app.pr_state_filter,
+                                            app.pr_assignee_filter,
+                                        );
+                                    }
+                                    app.clamp_selected();
+                                    app.last_refresh = Instant::now();
+                                }
+                                KeyCode::Char('m')
+                                    if app.active_section == 0 || app.active_section == 3 =>
+                                {
+                                    if app.active_section == 0 {
+                                        app.issue_assignee_filter =
+                                            app.issue_assignee_filter.toggle();
+                                        app.issues = fetch_issues(
+                                            &app.repo,
+                                            app.issue_state_filter,
+                                            app.issue_assignee_filter,
+                                        );
+                                    } else {
+                                        app.pr_assignee_filter = app.pr_assignee_filter.toggle();
+                                        app.pull_requests = fetch_prs(
+                                            &app.repo,
+                                            app.pr_state_filter,
+                                            app.pr_assignee_filter,
+                                        );
+                                    }
+                                    app.clamp_selected();
+                                    app.last_refresh = Instant::now();
+                                }
                                 KeyCode::Up | KeyCode::Char('k') => {
                                     app.move_card_up();
                                 }
@@ -1310,7 +1424,11 @@ fn main() -> Result<()> {
                                             let repo = app.repo.clone();
                                             match close_issue(&repo, number) {
                                                 Ok(()) => {
-                                                    app.issues = fetch_issues(&repo);
+                                                    app.issues = fetch_issues(
+                                                        &repo,
+                                                        app.issue_state_filter,
+                                                        app.issue_assignee_filter,
+                                                    );
                                                     app.clamp_selected();
                                                     app.last_refresh = Instant::now();
                                                     app.status_message =
@@ -1397,7 +1515,11 @@ fn main() -> Result<()> {
                                             let body = modal.body.clone();
                                             match create_issue(&app.repo, &title, &body) {
                                                 Ok(number) => {
-                                                    app.issues = fetch_issues(&app.repo);
+                                                    app.issues = fetch_issues(
+                                                        &app.repo,
+                                                        app.issue_state_filter,
+                                                        app.issue_assignee_filter,
+                                                    );
                                                     app.clamp_selected();
                                                     app.last_refresh = Instant::now();
                                                     app.issue_modal = None;
@@ -1719,11 +1841,21 @@ fn ui(frame: &mut Frame, app: &App) {
         ])
         .split(outer[1]);
 
+    let issue_title = format!(
+        " Issues [{}|{}] ",
+        app.issue_state_filter.label(),
+        app.issue_assignee_filter.label()
+    );
+    let pr_title = format!(
+        " Pull Requests [{}|{}] ",
+        app.pr_state_filter.label(),
+        app.pr_assignee_filter.label()
+    );
     let section_data: [(&str, Color, &[Card]); 4] = [
-        (" Issues ", Color::Red, &app.issues),
+        (&issue_title, Color::Red, &app.issues),
         (" Worktrees ", Color::Yellow, &app.worktrees),
         (" Sessions ", Color::Blue, &app.sessions),
-        (" Pull Requests ", Color::Magenta, &app.pull_requests),
+        (&pr_title, Color::Magenta, &app.pull_requests),
     ];
 
     let filter_query = match &app.mode {
@@ -1801,6 +1933,10 @@ fn ui(frame: &mut Frame, app: &App) {
                 spans.push(Span::styled(" Worktree+Claude ", desc_style));
                 spans.push(Span::styled(" d ", key_style));
                 spans.push(Span::styled(" Close issue ", desc_style));
+                spans.push(Span::styled(" s ", key_style));
+                spans.push(Span::styled(" Open/Closed ", desc_style));
+                spans.push(Span::styled(" m ", key_style));
+                spans.push(Span::styled(" Assigned to me ", desc_style));
             }
             if app.active_section == 1 {
                 spans.push(Span::styled(" d ", key_style));
@@ -1817,6 +1953,10 @@ fn ui(frame: &mut Frame, app: &App) {
                 spans.push(Span::styled(" Open in browser ", desc_style));
                 spans.push(Span::styled(" r ", key_accent));
                 spans.push(Span::styled(" Mark ready ", desc_style));
+                spans.push(Span::styled(" s ", key_style));
+                spans.push(Span::styled(" Open/Closed ", desc_style));
+                spans.push(Span::styled(" m ", key_style));
+                spans.push(Span::styled(" Assigned to me ", desc_style));
             }
             spans
         }
