@@ -276,10 +276,10 @@ fn main() -> Result<()> {
                                 KeyCode::Enter => {
                                     app.enter_repo_select();
                                 }
-                                KeyCode::Tab => {
+                                KeyCode::Tab | KeyCode::Char('l') => {
                                     app.active_section = (app.active_section + 1) % 4;
                                 }
-                                KeyCode::BackTab => {
+                                KeyCode::BackTab | KeyCode::Char('h') => {
                                     app.active_section = (app.active_section + 3) % 4;
                                 }
                                 KeyCode::Char('R') => {
