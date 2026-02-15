@@ -338,7 +338,16 @@ fn fetch_prs(repo: &str) -> Vec<Card> {
 fn create_issue(repo: &str, title: &str, body: &str) -> std::result::Result<(), String> {
     let output = Command::new("gh")
         .args([
-            "issue", "create", "--repo", repo, "--title", title, "--body", body,
+            "issue",
+            "create",
+            "--repo",
+            repo,
+            "--title",
+            title,
+            "--body",
+            body,
+            "--assignee",
+            "@me",
         ])
         .output()
         .map_err(|e| format!("Failed to run gh: {}", e))?;
@@ -523,6 +532,19 @@ fn create_worktree_and_session(
     // Pre-trust the worktree directory for Claude
     let _ = trust_directory(&worktree_path);
 
+    // Auto-assign the issue to the current user
+    let _ = Command::new("gh")
+        .args([
+            "issue",
+            "edit",
+            "--repo",
+            repo,
+            &number.to_string(),
+            "--add-assignee",
+            "@me",
+        ])
+        .output();
+
     // Create tmux session with neovim in the first pane
     let output = Command::new("tmux")
         .args([
@@ -555,7 +577,7 @@ fn create_worktree_and_session(
     };
 
     let prompt = format!(
-        "You are working on GitHub issue #{} for the repo {}. Title: {}. {} Please investigate the codebase and implement a solution for this issue. When you are confident the problem is solved, commit your changes and open a draft pull request with a clear title and description that explains what was changed and why. Reference the issue with 'Closes #{}' in the PR body.",
+        "You are working on GitHub issue #{} for the repo {}. Title: {}. {} Please investigate the codebase and implement a solution for this issue. When you are confident the problem is solved, commit your changes and open a draft pull request with a clear title and description that explains what was changed and why. Reference the issue with 'Closes #{}' in the PR body. Use '--assignee @me' when creating the pull request to auto-assign it.",
         number, repo, title, body_clean, number
     );
 
