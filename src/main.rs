@@ -2272,7 +2272,7 @@ fn render_card(frame: &mut Frame, area: Rect, card: &Card, is_selected: bool, is
             .fg(Color::Rgb(255, 200, 50))
             .add_modifier(Modifier::BOLD)
     } else if is_related {
-        Style::default().fg(Color::Rgb(100, 100, 100))
+        Style::default().fg(Color::Rgb(180, 160, 100))
     } else {
         Style::default().fg(Color::DarkGray)
     };
