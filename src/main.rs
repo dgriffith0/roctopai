@@ -672,7 +672,7 @@ fn remove_worktree(path: &str, branch: &str) -> std::result::Result<(), String> 
         .output();
 
     let output = Command::new("git")
-        .args(["worktree", "remove", path])
+        .args(["worktree", "remove", "--force", path])
         .output()
         .map_err(|e| format!("Failed to run git: {}", e))?;
 
