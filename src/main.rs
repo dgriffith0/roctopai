@@ -803,8 +803,8 @@ impl App {
         match section {
             0 => &self.issues,
             1 => &self.worktrees,
-            2 => &self.pull_requests,
-            3 => &self.sessions,
+            2 => &self.sessions,
+            3 => &self.pull_requests,
             _ => &[],
         }
     }
@@ -1142,16 +1142,16 @@ fn main() -> Result<()> {
                                     }
                                 }
                                 // PR actions: 'o' to open in browser, 'r' to mark ready
-                                KeyCode::Char('o') if app.active_section == 2 => {
-                                    if let Some(card) = app.pull_requests.get(app.selected_card[2])
+                                KeyCode::Char('o') if app.active_section == 3 => {
+                                    if let Some(card) = app.pull_requests.get(app.selected_card[3])
                                     {
                                         if let Some(url) = &card.url {
                                             let _ = Command::new("open").arg(url).output();
                                         }
                                     }
                                 }
-                                KeyCode::Char('r') if app.active_section == 2 => {
-                                    if let Some(card) = app.pull_requests.get(app.selected_card[2])
+                                KeyCode::Char('r') if app.active_section == 3 => {
+                                    if let Some(card) = app.pull_requests.get(app.selected_card[3])
                                     {
                                         if card.is_draft == Some(true) {
                                             if let Some(number) = card.pr_number {
@@ -1195,8 +1195,8 @@ fn main() -> Result<()> {
                                         }
                                     }
                                 }
-                                KeyCode::Char('d') if app.active_section == 3 => {
-                                    if let Some(card) = app.sessions.get(app.selected_card[3]) {
+                                KeyCode::Char('d') if app.active_section == 2 => {
+                                    if let Some(card) = app.sessions.get(app.selected_card[2]) {
                                         let session_name = card.title.clone();
                                         app.confirm_modal = Some(ConfirmModal {
                                             message: format!(
@@ -1210,8 +1210,8 @@ fn main() -> Result<()> {
                                         app.mode = Mode::Confirming;
                                     }
                                 }
-                                KeyCode::Char('a') if app.active_section == 3 => {
-                                    if let Some(card) = app.sessions.get(app.selected_card[3]) {
+                                KeyCode::Char('a') if app.active_section == 2 => {
+                                    if let Some(card) = app.sessions.get(app.selected_card[2]) {
                                         let session_name = card.title.clone();
                                         // Suspend TUI, attach to tmux, resume on detach
                                         disable_raw_mode()?;
@@ -1631,8 +1631,8 @@ fn ui(frame: &mut Frame, app: &App) {
     let section_data: [(&str, Color, &[Card]); 4] = [
         (" Issues ", Color::Red, &app.issues),
         (" Worktrees ", Color::Yellow, &app.worktrees),
-        (" Pull Requests ", Color::Magenta, &app.pull_requests),
         (" Sessions ", Color::Blue, &app.sessions),
+        (" Pull Requests ", Color::Magenta, &app.pull_requests),
     ];
 
     let filter_query = match &app.mode {
@@ -1716,16 +1716,16 @@ fn ui(frame: &mut Frame, app: &App) {
                 spans.push(Span::styled(" Remove worktree ", desc_style));
             }
             if app.active_section == 2 {
-                spans.push(Span::styled(" o ", key_accent));
-                spans.push(Span::styled(" Open in browser ", desc_style));
-                spans.push(Span::styled(" r ", key_accent));
-                spans.push(Span::styled(" Mark ready ", desc_style));
-            }
-            if app.active_section == 3 {
                 spans.push(Span::styled(" a ", key_accent));
                 spans.push(Span::styled(" Attach session ", desc_style));
                 spans.push(Span::styled(" d ", key_style));
                 spans.push(Span::styled(" Kill session ", desc_style));
+            }
+            if app.active_section == 3 {
+                spans.push(Span::styled(" o ", key_accent));
+                spans.push(Span::styled(" Open in browser ", desc_style));
+                spans.push(Span::styled(" r ", key_accent));
+                spans.push(Span::styled(" Mark ready ", desc_style));
             }
             spans
         }
