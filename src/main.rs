@@ -699,9 +699,13 @@ fn fetch_sessions() -> Vec<Card> {
         .filter(|name| !name.is_empty())
         .filter(|name| name.starts_with("issue-"))
         .map(|name| {
-            // Check if claude is running in any pane of this session
-            let status = Command::new("tmux")
-                .args(["list-panes", "-t", name, "-F", "#{pane_current_command}"])
+            // Default to "working"; only switch to "waiting" if the
+            // pane content shows a prompt.  The "finished" state is
+            // handled externally via hooks, so we don't try to detect
+            // it here.
+            let pane_target = format!("{}:.1", name);
+            let pane_content = Command::new("tmux")
+                .args(["capture-pane", "-t", &pane_target, "-p"])
                 .output()
                 .ok()
                 .and_then(|o| {
@@ -712,70 +716,20 @@ fn fetch_sessions() -> Vec<Card> {
                     }
                 });
 
-            // Claude's binary is named by its version (e.g. "2.1.42"),
-            // so check for "claude" or a semver-like pattern in pane commands
-            let has_claude = status
-                .as_ref()
-                .map(|s| {
-                    s.lines().any(|l| {
-                        let l = l.trim();
-                        l.contains("claude") || {
-                            let parts: Vec<&str> = l.split('.').collect();
-                            parts.len() >= 2
-                                && parts.iter().all(|p| p.chars().all(|c| c.is_ascii_digit()))
-                        }
-                    })
-                })
-                .unwrap_or(false);
-
-            // If claude is running, check pane content to see if it's
-            // actively processing or waiting for input
-            let claude_state = if has_claude {
-                let pane_target = format!("{}:.1", name);
-                let pane_content = Command::new("tmux")
-                    .args(["capture-pane", "-t", &pane_target, "-p"])
-                    .output()
-                    .ok()
-                    .and_then(|o| {
-                        if o.status.success() {
-                            Some(String::from_utf8_lossy(&o.stdout).to_string())
-                        } else {
-                            None
-                        }
-                    });
-
-                if let Some(content) = pane_content {
-                    let trimmed = content.trim_end();
-                    let last_lines: Vec<&str> = trimmed.lines().rev().take(5).collect();
-                    // Claude shows a ">" or "❯" prompt when waiting for input
-                    let waiting = last_lines.iter().any(|l| {
-                        let l = l.trim();
-                        l.starts_with('❯')
-                            || l.starts_with('>')
-                            || l.contains("What would you like")
-                    });
-                    if waiting {
-                        "waiting" // has prompt, waiting for user
-                    } else {
-                        "working" // actively processing
-                    }
+            let claude_state = if let Some(content) = pane_content {
+                let trimmed = content.trim_end();
+                let last_lines: Vec<&str> = trimmed.lines().rev().take(5).collect();
+                let waiting = last_lines.iter().any(|l| {
+                    let l = l.trim();
+                    l.starts_with('❯') || l.starts_with('>') || l.contains("What would you like")
+                });
+                if waiting {
+                    "waiting"
                 } else {
                     "working"
                 }
             } else {
-                // Claude process not detected — check if the Claude pane
-                // (.1) still exists.  If it does, Claude is likely still
-                // starting up; only mark "finished" when the pane is gone
-                // (i.e. the session has a single pane left).
-                let pane_count = status
-                    .as_ref()
-                    .map(|s| s.lines().filter(|l| !l.trim().is_empty()).count())
-                    .unwrap_or(0);
-                if pane_count > 1 {
-                    "working" // Claude pane exists but process not yet detected
-                } else {
-                    "finished"
-                }
+                "working"
             };
 
             let (tag, tag_color, description) = match claude_state {
