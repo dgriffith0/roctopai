@@ -1,9 +1,12 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
+use std::io::Read as _;
+use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use color_eyre::Result;
@@ -20,6 +23,104 @@ use ratatui::{
     Frame, Terminal,
 };
 use serde::{Deserialize, Serialize};
+
+const SOCKET_PATH: &str = "/tmp/roctopai-events.sock";
+
+type SessionStates = Arc<Mutex<HashMap<String, String>>>;
+
+fn start_event_socket(states: SessionStates) -> io::Result<()> {
+    let _ = fs::remove_file(SOCKET_PATH);
+    let listener = UnixListener::bind(SOCKET_PATH)?;
+
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            match stream {
+                Ok(mut stream) => {
+                    let mut buf = String::new();
+                    let _ = stream.read_to_string(&mut buf);
+                    if let Ok(event) = serde_json::from_str::<serde_json::Value>(&buf) {
+                        if let (Some(session), Some(status)) =
+                            (event["session"].as_str(), event["status"].as_str())
+                        {
+                            if let Ok(mut states) = states.lock() {
+                                states.insert(session.to_string(), status.to_string());
+                            }
+                        }
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    Ok(())
+}
+
+fn ensure_hook_script() -> std::result::Result<PathBuf, String> {
+    let config_dir = dirs::config_dir()
+        .ok_or("Could not find config directory")?
+        .join("roctopai");
+    fs::create_dir_all(&config_dir).map_err(|e| format!("Failed to create config dir: {}", e))?;
+
+    let script_path = config_dir.join("event-hook.sh");
+    let script = format!(
+        r#"#!/bin/bash
+# Roctopai event hook - sends Claude session events to the Unix socket
+STATUS="$1"
+cat > /dev/null
+SESSION=$(basename "$PWD" | grep -o 'issue-[0-9]*')
+[ -z "$SESSION" ] && exit 0
+SOCKET="{socket}"
+[ -S "$SOCKET" ] || exit 0
+printf '{{"session":"%s","status":"%s"}}\n' "$SESSION" "$STATUS" | nc -w1 -U "$SOCKET" 2>/dev/null
+exit 0
+"#,
+        socket = SOCKET_PATH
+    );
+    fs::write(&script_path, &script).map_err(|e| format!("Failed to write hook script: {}", e))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755))
+            .map_err(|e| format!("Failed to chmod hook script: {}", e))?;
+    }
+
+    Ok(script_path)
+}
+
+fn write_worktree_hook_config(
+    worktree_path: &str,
+    hook_script: &str,
+) -> std::result::Result<(), String> {
+    let claude_dir = format!("{}/.claude", worktree_path);
+    fs::create_dir_all(&claude_dir).map_err(|e| format!("Failed to create .claude dir: {}", e))?;
+
+    let settings_path = format!("{}/.claude/settings.local.json", worktree_path);
+
+    // Read existing settings if present and merge
+    let mut settings: serde_json::Value = if let Ok(data) = fs::read_to_string(&settings_path) {
+        serde_json::from_str(&data).unwrap_or_else(|_| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+
+    let hook_config = serde_json::json!({
+        "PreToolUse": [{"hooks": [{"type": "command", "command": format!("{} working", hook_script)}]}],
+        "Stop": [{"hooks": [{"type": "command", "command": format!("{} idle", hook_script)}]}],
+        "Notification": [{"hooks": [{"type": "command", "command": format!("{} waiting", hook_script)}]}]
+    });
+
+    settings["hooks"] = hook_config;
+
+    fs::write(
+        &settings_path,
+        serde_json::to_string_pretty(&settings).unwrap(),
+    )
+    .map_err(|e| format!("Failed to write hook settings: {}", e))?;
+
+    Ok(())
+}
 
 #[derive(Clone, Copy, PartialEq)]
 enum StateFilter {
@@ -682,6 +783,7 @@ fn create_worktree_and_session(
     number: u64,
     title: &str,
     body: &str,
+    hook_script: Option<&str>,
 ) -> std::result::Result<(), String> {
     let repo_name = get_repo_name(repo);
     let branch = format!("issue-{}", number);
@@ -700,6 +802,11 @@ fn create_worktree_and_session(
 
     // Pre-trust the worktree directory for Claude
     let _ = trust_directory(&worktree_path);
+
+    // Write Claude hook config for event socket integration
+    if let Some(script) = hook_script {
+        let _ = write_worktree_hook_config(&worktree_path, script);
+    }
 
     // Auto-assign the issue to the current user
     let _ = Command::new("gh")
@@ -789,7 +896,7 @@ fn create_worktree_and_session(
     Ok(())
 }
 
-fn fetch_sessions() -> Vec<Card> {
+fn fetch_sessions(socket_states: &SessionStates) -> Vec<Card> {
     let output = Command::new("tmux")
         .args(["list-sessions", "-F", "#{session_name}"])
         .output();
@@ -799,49 +906,56 @@ fn fetch_sessions() -> Vec<Card> {
         _ => return Vec::new(),
     };
 
+    let states = socket_states.lock().unwrap_or_else(|e| e.into_inner());
+
     let stdout = String::from_utf8_lossy(&output.stdout);
     stdout
         .lines()
         .filter(|name| !name.is_empty())
         .filter(|name| name.starts_with("issue-"))
         .map(|name| {
-            // Default to "working"; only switch to "waiting" if the
-            // pane content shows a prompt.  The "finished" state is
-            // handled externally via hooks, so we don't try to detect
-            // it here.
-            let pane_target = format!("{}:.1", name);
-            let pane_content = Command::new("tmux")
-                .args(["capture-pane", "-t", &pane_target, "-p"])
-                .output()
-                .ok()
-                .and_then(|o| {
-                    if o.status.success() {
-                        Some(String::from_utf8_lossy(&o.stdout).to_string())
-                    } else {
-                        None
-                    }
-                });
+            // Use socket-derived state if available, otherwise fall back
+            // to pane content detection.
+            let claude_state = if let Some(status) = states.get(name) {
+                status.as_str()
+            } else {
+                let pane_target = format!("{}:.1", name);
+                let pane_content = Command::new("tmux")
+                    .args(["capture-pane", "-t", &pane_target, "-p"])
+                    .output()
+                    .ok()
+                    .and_then(|o| {
+                        if o.status.success() {
+                            Some(String::from_utf8_lossy(&o.stdout).to_string())
+                        } else {
+                            None
+                        }
+                    });
 
-            let claude_state = if let Some(content) = pane_content {
-                let trimmed = content.trim_end();
-                let last_lines: Vec<&str> = trimmed.lines().rev().take(5).collect();
-                let waiting = last_lines.iter().any(|l| {
-                    let l = l.trim();
-                    l.starts_with('❯') || l.starts_with('>') || l.contains("What would you like")
-                });
-                if waiting {
-                    "waiting"
+                if let Some(content) = pane_content {
+                    let trimmed = content.trim_end();
+                    let last_lines: Vec<&str> = trimmed.lines().rev().take(5).collect();
+                    let waiting = last_lines.iter().any(|l| {
+                        let l = l.trim();
+                        l.starts_with('❯')
+                            || l.starts_with('>')
+                            || l.contains("What would you like")
+                    });
+                    if waiting {
+                        "idle"
+                    } else {
+                        "working"
+                    }
                 } else {
                     "working"
                 }
-            } else {
-                "working"
             };
 
             let (tag, tag_color, description) = match claude_state {
                 "working" => ("working", Color::Green, "Claude is processing..."),
                 "waiting" => ("waiting", Color::Yellow, "Waiting for input"),
-                _ => ("finished", Color::DarkGray, "Claude finished"),
+                "idle" => ("idle", Color::Blue, "Ready for prompts"),
+                _ => ("working", Color::Green, "Claude is processing..."),
             };
 
             // Link to the related issue card
@@ -920,6 +1034,8 @@ struct App {
     confirm_modal: Option<ConfirmModal>,
     status_message: Option<String>,
     last_refresh: Instant,
+    session_states: SessionStates,
+    hook_script_path: Option<String>,
     issue_state_filter: StateFilter,
     issue_assignee_filter: AssigneeFilter,
     pr_state_filter: StateFilter,
@@ -930,7 +1046,10 @@ struct App {
 }
 
 impl App {
-    fn new() -> Self {
+    fn new(session_states: SessionStates) -> Self {
+        let hook_script_path = ensure_hook_script()
+            .ok()
+            .map(|p| p.to_string_lossy().to_string());
         Self {
             screen: Screen::RepoSelect,
             repo_select: RepoSelectState::new(),
@@ -946,6 +1065,8 @@ impl App {
             status_message: None,
             sessions: Vec::new(),
             last_refresh: Instant::now(),
+            session_states,
+            hook_script_path,
             issue_state_filter: StateFilter::Open,
             issue_assignee_filter: AssigneeFilter::All,
             pr_state_filter: StateFilter::Open,
@@ -1054,7 +1175,7 @@ impl App {
             self.worktrees = fetch_worktrees();
         }
 
-        self.sessions = fetch_sessions();
+        self.sessions = fetch_sessions(&self.session_states);
         self.clamp_selected();
         self.last_refresh = Instant::now();
     }
@@ -1073,11 +1194,16 @@ impl App {
 
 fn main() -> Result<()> {
     color_eyre::install()?;
+
+    // Start the Unix socket event server for Claude hook events
+    let session_states: SessionStates = Arc::new(Mutex::new(HashMap::new()));
+    let _ = start_event_socket(Arc::clone(&session_states));
+
     enable_raw_mode()?;
     io::stdout().execute(EnterAlternateScreen)?;
 
     let mut terminal = Terminal::new(ratatui::backend::CrosstermBackend::new(io::stdout()))?;
-    let mut app = App::new();
+    let mut app = App::new(session_states);
 
     // Load saved config
     if let Some(config) = load_config() {
@@ -1125,7 +1251,7 @@ fn main() -> Result<()> {
                         match worktree_result {
                             Ok(()) => {
                                 app.worktrees = fetch_worktrees();
-                                app.sessions = fetch_sessions();
+                                app.sessions = fetch_sessions(&app.session_states);
                                 app.clamp_selected();
                                 app.status_message = Some(format!(
                                     "Created issue #{} with worktree and session",
@@ -1338,11 +1464,16 @@ fn main() -> Result<()> {
                                                     .unwrap_or_default();
                                                 let repo = app.repo.clone();
                                                 match create_worktree_and_session(
-                                                    &repo, number, &title, &body,
+                                                    &repo,
+                                                    number,
+                                                    &title,
+                                                    &body,
+                                                    app.hook_script_path.as_deref(),
                                                 ) {
                                                     Ok(()) => {
                                                         app.worktrees = fetch_worktrees();
-                                                        app.sessions = fetch_sessions();
+                                                        app.sessions =
+                                                            fetch_sessions(&app.session_states);
                                                         app.clamp_selected();
                                                         app.last_refresh = Instant::now();
                                                         app.status_message = Some(format!(
@@ -1602,7 +1733,8 @@ fn main() -> Result<()> {
                                             match remove_worktree(&path, &branch) {
                                                 Ok(()) => {
                                                     app.worktrees = fetch_worktrees();
-                                                    app.sessions = fetch_sessions();
+                                                    app.sessions =
+                                                        fetch_sessions(&app.session_states);
                                                     app.clamp_selected();
                                                     app.last_refresh = Instant::now();
                                                     app.status_message = Some(format!(
@@ -1622,7 +1754,8 @@ fn main() -> Result<()> {
                                                 .output();
                                             match output {
                                                 Ok(o) if o.status.success() => {
-                                                    app.sessions = fetch_sessions();
+                                                    app.sessions =
+                                                        fetch_sessions(&app.session_states);
                                                     app.clamp_selected();
                                                     app.last_refresh = Instant::now();
                                                     app.status_message =
@@ -1733,7 +1866,8 @@ fn main() -> Result<()> {
                                                         app.pr_assignee_filter,
                                                     );
                                                     app.worktrees = fetch_worktrees();
-                                                    app.sessions = fetch_sessions();
+                                                    app.sessions =
+                                                        fetch_sessions(&app.session_states);
                                                     app.clamp_selected();
                                                     app.last_refresh = Instant::now();
                                                     app.status_message = Some(format!(
@@ -1819,6 +1953,7 @@ fn main() -> Result<()> {
                                             modal.error = None;
                                             let body = modal.body.clone();
                                             let repo = app.repo.clone();
+                                            let hook_script = app.hook_script_path.clone();
                                             let (tx, rx) = mpsc::channel();
                                             app.issue_submit_rx = Some(rx);
                                             std::thread::spawn(move || {
@@ -1826,7 +1961,11 @@ fn main() -> Result<()> {
                                                     Ok(number) => {
                                                         let worktree_result =
                                                             create_worktree_and_session(
-                                                                &repo, number, &title, &body,
+                                                                &repo,
+                                                                number,
+                                                                &title,
+                                                                &body,
+                                                                hook_script.as_deref(),
                                                             );
                                                         let _ =
                                                             tx.send(IssueSubmitResult::Success {
@@ -1871,6 +2010,7 @@ fn main() -> Result<()> {
 
     disable_raw_mode()?;
     io::stdout().execute(LeaveAlternateScreen)?;
+    let _ = fs::remove_file(SOCKET_PATH);
     Ok(())
 }
 
