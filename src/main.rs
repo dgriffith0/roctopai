@@ -182,24 +182,18 @@ struct Card {
 
 enum MergeStrategy {
     Merge,
-    Squash,
-    Rebase,
 }
 
 impl MergeStrategy {
     fn flag(&self) -> &str {
         match self {
             MergeStrategy::Merge => "--merge",
-            MergeStrategy::Squash => "--squash",
-            MergeStrategy::Rebase => "--rebase",
         }
     }
 
     fn label(&self) -> &str {
         match self {
             MergeStrategy::Merge => "merge",
-            MergeStrategy::Squash => "squash",
-            MergeStrategy::Rebase => "rebase",
         }
     }
 }
@@ -235,7 +229,6 @@ enum Mode {
     Filtering { query: String },
     CreatingIssue,
     Confirming,
-    MergingPr,
 }
 
 #[derive(PartialEq)]
@@ -1040,7 +1033,6 @@ struct App {
     issue_assignee_filter: AssigneeFilter,
     pr_state_filter: StateFilter,
     pr_assignee_filter: AssigneeFilter,
-    merge_pr_number: Option<u64>,
     issue_submit_rx: Option<mpsc::Receiver<IssueSubmitResult>>,
     spinner_tick: usize,
 }
@@ -1071,7 +1063,6 @@ impl App {
             issue_assignee_filter: AssigneeFilter::All,
             pr_state_filter: StateFilter::Open,
             pr_assignee_filter: AssigneeFilter::All,
-            merge_pr_number: None,
             issue_submit_rx: None,
             spinner_tick: 0,
         }
@@ -1617,8 +1608,17 @@ fn main() -> Result<()> {
                                                 app.status_message =
                                                     Some("Cannot merge a draft PR".to_string());
                                             } else {
-                                                app.merge_pr_number = Some(number);
-                                                app.mode = Mode::MergingPr;
+                                                app.confirm_modal = Some(ConfirmModal {
+                                                    message: format!(
+                                                        "Merge PR #{} with merge strategy?",
+                                                        number
+                                                    ),
+                                                    on_confirm: ConfirmAction::MergePr {
+                                                        number,
+                                                        strategy: MergeStrategy::Merge,
+                                                    },
+                                                });
+                                                app.mode = Mode::Confirming;
                                             }
                                         }
                                     }
@@ -1893,31 +1893,6 @@ fn main() -> Result<()> {
                             }
                             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                                 app.confirm_modal = None;
-                                app.mode = Mode::Normal;
-                            }
-                            _ => {}
-                        },
-                        Mode::MergingPr => match key.code {
-                            KeyCode::Char('1') | KeyCode::Char('2') | KeyCode::Char('3') => {
-                                let strategy = match key.code {
-                                    KeyCode::Char('1') => MergeStrategy::Merge,
-                                    KeyCode::Char('2') => MergeStrategy::Squash,
-                                    _ => MergeStrategy::Rebase,
-                                };
-                                if let Some(number) = app.merge_pr_number.take() {
-                                    app.confirm_modal = Some(ConfirmModal {
-                                        message: format!(
-                                            "Merge PR #{} with {} strategy?",
-                                            number,
-                                            strategy.label()
-                                        ),
-                                        on_confirm: ConfirmAction::MergePr { number, strategy },
-                                    });
-                                    app.mode = Mode::Confirming;
-                                }
-                            }
-                            KeyCode::Esc => {
-                                app.merge_pr_number = None;
                                 app.mode = Mode::Normal;
                             }
                             _ => {}
@@ -2377,16 +2352,6 @@ fn ui(frame: &mut Frame, app: &App) {
             Span::styled(" n/Esc ", key_style),
             Span::styled(" Cancel ", desc_style),
         ],
-        Mode::MergingPr => vec![
-            Span::styled(" 1 ", key_accent),
-            Span::styled(" Merge ", desc_style),
-            Span::styled(" 2 ", key_accent),
-            Span::styled(" Squash ", desc_style),
-            Span::styled(" 3 ", key_accent),
-            Span::styled(" Rebase ", desc_style),
-            Span::styled(" Esc ", key_style),
-            Span::styled(" Cancel ", desc_style),
-        ],
     };
     global_spans.extend(global_mode_spans);
 
@@ -2490,13 +2455,6 @@ fn ui(frame: &mut Frame, app: &App) {
     // Render confirm modal overlay if open
     if let Some(modal) = &app.confirm_modal {
         ui_confirm_modal(frame, modal);
-    }
-
-    // Render merge strategy selection modal
-    if app.mode == Mode::MergingPr {
-        if let Some(number) = app.merge_pr_number {
-            ui_merge_modal(frame, number);
-        }
     }
 }
 
@@ -2650,60 +2608,6 @@ fn ui_issue_modal(frame: &mut Frame, modal: &IssueModal, spinner_tick: usize) {
         Style::default().fg(Color::DarkGray),
     )]));
     frame.render_widget(hint, chunks[3]);
-}
-
-fn ui_merge_modal(frame: &mut Frame, pr_number: u64) {
-    let area = centered_rect(40, 25, frame.area());
-
-    frame.render_widget(Clear, area);
-
-    let outer_block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Magenta))
-        .title(format!(" Merge PR #{} ", pr_number))
-        .title_style(
-            Style::default()
-                .fg(Color::White)
-                .bg(Color::Magenta)
-                .add_modifier(Modifier::BOLD),
-        )
-        .padding(Padding::new(1, 1, 1, 0));
-    let inner = outer_block.inner(area);
-    frame.render_widget(outer_block, area);
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(1)])
-        .split(inner);
-
-    let key_style = Style::default()
-        .fg(Color::Magenta)
-        .add_modifier(Modifier::BOLD);
-    let text_style = Style::default().fg(Color::White);
-
-    let options = Paragraph::new(vec![
-        Line::from(Span::styled("Select merge strategy:", text_style)),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled(" 1 ", key_style),
-            Span::styled(" Create a merge commit", text_style),
-        ]),
-        Line::from(vec![
-            Span::styled(" 2 ", key_style),
-            Span::styled(" Squash and merge", text_style),
-        ]),
-        Line::from(vec![
-            Span::styled(" 3 ", key_style),
-            Span::styled(" Rebase and merge", text_style),
-        ]),
-    ]);
-    frame.render_widget(options, chunks[0]);
-
-    let hint = Paragraph::new(Line::from(vec![Span::styled(
-        "Esc to cancel",
-        Style::default().fg(Color::DarkGray),
-    )]));
-    frame.render_widget(hint, chunks[1]);
 }
 
 fn ui_confirm_modal(frame: &mut Frame, modal: &ConfirmModal) {
