@@ -903,11 +903,41 @@ impl App {
     fn selected_card_related_ids(&self) -> HashSet<String> {
         let cards = self.section_cards(self.active_section);
         let idx = self.selected_card[self.active_section];
-        if let Some(card) = cards.get(idx) {
-            card.related.iter().cloned().collect()
+        let card = match cards.get(idx) {
+            Some(c) => c,
+            None => return HashSet::new(),
+        };
+
+        // Find the issue key that ties all related cards together.
+        // If this IS an issue card, its own id is the key.
+        // Otherwise, look for an issue-N entry in the related field.
+        let issue_key = if card.id.starts_with("issue-") {
+            Some(card.id.clone())
         } else {
-            HashSet::new()
+            card.related
+                .iter()
+                .find(|r| r.starts_with("issue-"))
+                .cloned()
+        };
+
+        let Some(key) = issue_key else {
+            return card.related.iter().cloned().collect();
+        };
+
+        // Collect all cards across every column whose id matches the key
+        // or whose related list contains the key, excluding the selected card.
+        let mut ids = HashSet::new();
+        for section in 0..4 {
+            for c in self.section_cards(section) {
+                if c.id == card.id {
+                    continue;
+                }
+                if c.id == key || c.related.contains(&key) {
+                    ids.insert(c.id.clone());
+                }
+            }
         }
+        ids
     }
 
     fn refresh_data(&mut self) {
