@@ -471,6 +471,59 @@ fn remove_worktree(path: &str, branch: &str) -> std::result::Result<(), String> 
     Ok(())
 }
 
+fn fetch_merged_pr_branches(repo: &str) -> Vec<String> {
+    let output = Command::new("gh")
+        .args([
+            "pr",
+            "list",
+            "--repo",
+            repo,
+            "--state",
+            "merged",
+            "--json",
+            "headRefName",
+            "--limit",
+            "30",
+        ])
+        .output();
+
+    let output = match output {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let prs: Vec<serde_json::Value> = match serde_json::from_str(&stdout) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+
+    prs.into_iter()
+        .filter_map(|pr| pr["headRefName"].as_str().map(|s| s.to_string()))
+        .collect()
+}
+
+fn cleanup_merged_worktrees(repo: &str, worktrees: &[Card]) -> Vec<String> {
+    let merged_branches = fetch_merged_pr_branches(repo);
+    if merged_branches.is_empty() {
+        return Vec::new();
+    }
+
+    let merged_set: HashSet<&str> = merged_branches.iter().map(|s| s.as_str()).collect();
+    let mut cleaned = Vec::new();
+
+    for wt in worktrees {
+        // worktree title is the branch name, description is the path
+        if merged_set.contains(wt.title.as_str())
+            && remove_worktree(&wt.description, &wt.title).is_ok()
+        {
+            cleaned.push(wt.title.clone());
+        }
+    }
+
+    cleaned
+}
+
 fn trust_directory(path: &str) -> std::result::Result<(), String> {
     let claude_json = dirs::home_dir()
         .ok_or("Could not find home directory")?
@@ -852,6 +905,15 @@ impl App {
         self.issues = fetch_issues(&self.repo);
         self.pull_requests = fetch_prs(&self.repo);
         self.worktrees = fetch_worktrees();
+
+        // Clean up worktrees and sessions for merged PRs
+        let cleaned = cleanup_merged_worktrees(&self.repo, &self.worktrees);
+        if !cleaned.is_empty() {
+            self.status_message = Some(format!("Cleaned up merged: {}", cleaned.join(", ")));
+            // Re-fetch worktrees after cleanup
+            self.worktrees = fetch_worktrees();
+        }
+
         self.sessions = fetch_sessions();
         self.clamp_selected();
         self.last_refresh = Instant::now();
