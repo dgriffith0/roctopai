@@ -336,7 +336,7 @@ fn fetch_prs(repo: &str) -> Vec<Card> {
         .collect()
 }
 
-fn create_issue(repo: &str, title: &str, body: &str) -> std::result::Result<(), String> {
+fn create_issue(repo: &str, title: &str, body: &str) -> std::result::Result<u64, String> {
     let output = Command::new("gh")
         .args([
             "issue",
@@ -358,7 +358,16 @@ fn create_issue(repo: &str, title: &str, body: &str) -> std::result::Result<(), 
         return Err(format!("gh error: {}", stderr.trim()));
     }
 
-    Ok(())
+    // gh issue create outputs a URL like https://github.com/owner/repo/issues/10
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let number = stdout
+        .trim()
+        .rsplit('/')
+        .next()
+        .and_then(|s| s.parse::<u64>().ok())
+        .ok_or_else(|| format!("Could not parse issue number from: {}", stdout.trim()))?;
+
+    Ok(number)
 }
 
 fn get_repo_name(repo: &str) -> &str {
@@ -1389,12 +1398,34 @@ fn main() -> Result<()> {
                                         } else {
                                             let body = modal.body.clone();
                                             match create_issue(&app.repo, &title, &body) {
-                                                Ok(()) => {
+                                                Ok(number) => {
                                                     app.issues = fetch_issues(&app.repo);
                                                     app.clamp_selected();
                                                     app.last_refresh = Instant::now();
                                                     app.issue_modal = None;
                                                     app.mode = Mode::Normal;
+
+                                                    // Automatically create worktree and session
+                                                    let repo = app.repo.clone();
+                                                    match create_worktree_and_session(
+                                                        &repo, number, &title, &body,
+                                                    ) {
+                                                        Ok(()) => {
+                                                            app.worktrees = fetch_worktrees();
+                                                            app.sessions = fetch_sessions();
+                                                            app.clamp_selected();
+                                                            app.status_message = Some(format!(
+                                                                "Created issue #{} with worktree and session",
+                                                                number
+                                                            ));
+                                                        }
+                                                        Err(e) => {
+                                                            app.status_message = Some(format!(
+                                                                "Created issue #{} but failed to create worktree: {}",
+                                                                number, e
+                                                            ));
+                                                        }
+                                                    }
                                                 }
                                                 Err(e) => {
                                                     modal.error = Some(e);
