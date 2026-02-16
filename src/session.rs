@@ -30,7 +30,7 @@ pub fn fetch_sessions(socket_states: &SessionStates) -> Vec<Card> {
             let claude_state = if let Some(status) = states.get(name) {
                 status.as_str()
             } else {
-                let pane_target = format!("{}:.1", name);
+                let pane_target = format!("{}:.0", name);
                 let pane_content = Command::new("tmux")
                     .args(["capture-pane", "-t", &pane_target, "-p"])
                     .output()
@@ -150,18 +150,9 @@ pub fn create_worktree_and_session(
         ])
         .output();
 
-    // Create tmux session with neovim in the first pane
+    // Create tmux session with a shell in the worktree directory
     let output = Command::new("tmux")
-        .args([
-            "new-session",
-            "-d",
-            "-s",
-            &branch,
-            "-c",
-            &worktree_path,
-            "nvim",
-            ".",
-        ])
+        .args(["new-session", "-d", "-s", &branch, "-c", &worktree_path])
         .output()
         .map_err(|e| format!("Failed to create tmux session: {}", e))?;
 
@@ -190,37 +181,22 @@ pub fn create_worktree_and_session(
     let prompt_file = format!("/tmp/roctopai-prompt-{}.txt", number);
     fs::write(&prompt_file, &prompt).map_err(|e| format!("Failed to write prompt file: {}", e))?;
 
-    // Split right pane running Claude with the prompt via sh -c
+    // Send Claude command to the single pane
     let shell_cmd = format!(
         "claude \"$(cat '{}')\" --allowedTools Read,Edit,Bash",
         prompt_file
     );
 
-    let output = Command::new("tmux")
-        .args(["split-window", "-h", "-t", &branch, "-c", &worktree_path])
-        .output()
-        .map_err(|e| format!("Failed to split tmux pane: {}", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("tmux split error: {}", stderr.trim()));
-    }
-
     // Wait for shell to initialize, then send the command
     std::thread::sleep(std::time::Duration::from_millis(500));
 
-    let pane_target = format!("{}:.1", branch);
+    let pane_target = format!("{}:.0", branch);
     let _ = Command::new("tmux")
         .args(["send-keys", "-t", &pane_target, "-l", &shell_cmd])
         .output();
     let _ = Command::new("tmux")
         .args(["send-keys", "-t", &pane_target, "Enter"])
         .output();
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("tmux split error: {}", stderr.trim()));
-    }
 
     Ok(())
 }
