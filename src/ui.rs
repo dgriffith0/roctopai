@@ -618,6 +618,8 @@ pub fn ui(frame: &mut Frame, app: &App) {
                 area_spans.push(Span::styled(" Assigned to me ", desc_style));
             }
             1 => {
+                area_spans.push(Span::styled(" w ", key_accent));
+                area_spans.push(Span::styled(" New session ", desc_style));
                 area_spans.push(Span::styled(" e ", key_accent));
                 area_spans.push(Span::styled(" Editor ", desc_style));
                 area_spans.push(Span::styled(" v ", key_accent));
