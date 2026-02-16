@@ -122,6 +122,7 @@ pub enum Mode {
 pub enum Screen {
     RepoSelect,
     Board,
+    Dependencies,
 }
 
 #[derive(PartialEq)]

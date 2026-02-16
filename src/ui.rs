@@ -10,6 +10,7 @@ use ratatui::{
 };
 
 use crate::app::App;
+use crate::deps::Dependency;
 use crate::models::{
     card_matches, Card, ConfirmModal, IssueModal, Mode, RepoSelectPhase, RepoSelectState,
     REFRESH_INTERVAL,
@@ -213,6 +214,138 @@ pub fn ui_repo_select(frame: &mut Frame, state: &RepoSelectState) {
     }
 }
 
+pub fn ui_dependencies(frame: &mut Frame, deps: &[Dependency]) {
+    let area = frame.area();
+
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(0),
+            Constraint::Length(2),
+        ])
+        .split(area);
+
+    // Title bar
+    let title_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(" Dependencies ");
+    let title_text = Paragraph::new(Line::from(vec![Span::styled(
+        "  External Dependency Status",
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    )]))
+    .block(title_block);
+    frame.render_widget(title_text, vertical[0]);
+
+    // Dependency list
+    let content_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .padding(Padding::new(2, 2, 1, 0));
+    let inner = content_block.inner(vertical[1]);
+    frame.render_widget(content_block, vertical[1]);
+
+    let mut constraints: Vec<Constraint> = Vec::new();
+    // Header row
+    constraints.push(Constraint::Length(2));
+    // One row per dependency
+    for _ in deps {
+        constraints.push(Constraint::Length(2));
+    }
+    constraints.push(Constraint::Min(0));
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
+        .split(inner);
+
+    // Header
+    let header = Paragraph::new(Line::from(vec![Span::styled(
+        format!(
+            "{:<14} {:<10} {:<46} {}",
+            "Command", "Status", "Description", "Version"
+        ),
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )]));
+    frame.render_widget(header, rows[0]);
+
+    // Dependency rows
+    for (i, dep) in deps.iter().enumerate() {
+        let (status_text, status_color) = if dep.available {
+            ("OK", Color::Green)
+        } else if dep.required {
+            ("MISSING", Color::Red)
+        } else {
+            ("MISSING", Color::Yellow)
+        };
+
+        let version = dep.version.as_deref().unwrap_or("-");
+
+        let line = Line::from(vec![
+            Span::styled(
+                format!("{:<14} ", dep.name),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{:<10} ", status_text),
+                Style::default()
+                    .fg(status_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{:<46} ", dep.description),
+                Style::default().fg(Color::Gray),
+            ),
+            Span::styled(version, Style::default().fg(Color::DarkGray)),
+        ]);
+        frame.render_widget(Paragraph::new(line), rows[1 + i]);
+    }
+
+    // Bottom hint bar
+    let has_missing = deps.iter().any(|d| d.required && !d.available);
+    let bottom_rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Length(1)])
+        .split(vertical[2]);
+
+    let key_style = Style::default()
+        .fg(Color::White)
+        .bg(Color::Rgb(60, 60, 60))
+        .add_modifier(Modifier::BOLD);
+    let desc_style = Style::default().fg(Color::Gray);
+
+    let mut hints: Vec<Span> = vec![
+        Span::styled(" r ", key_style),
+        Span::styled(" Re-check ", desc_style),
+    ];
+    if has_missing {
+        hints.push(Span::styled(" Esc/q ", key_style));
+        hints.push(Span::styled(" Quit ", desc_style));
+    } else {
+        hints.push(Span::styled(" Enter ", key_style));
+        hints.push(Span::styled(" Continue ", desc_style));
+        hints.push(Span::styled(" Esc/q ", key_style));
+        hints.push(Span::styled(" Back ", desc_style));
+    }
+
+    frame.render_widget(Paragraph::new(Line::from(hints)), bottom_rows[0]);
+
+    if has_missing {
+        let warning = Paragraph::new(Line::from(vec![Span::styled(
+            " Install missing required dependencies to continue",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )]));
+        frame.render_widget(warning, bottom_rows[1]);
+    }
+}
+
 pub fn ui(frame: &mut Frame, app: &App) {
     let outer = Layout::default()
         .direction(Direction::Vertical)
@@ -337,6 +470,8 @@ pub fn ui(frame: &mut Frame, app: &App) {
                 Span::styled(" Change repo ", desc_style),
                 Span::styled(" R ", key_style),
                 Span::styled(" Refresh ", desc_style),
+                Span::styled(" D ", key_style),
+                Span::styled(" Deps ", desc_style),
             ]
         }
         Mode::Filtering { .. } => vec![

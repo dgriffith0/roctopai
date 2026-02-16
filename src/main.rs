@@ -1,5 +1,6 @@
 mod app;
 mod config;
+mod deps;
 mod git;
 mod github;
 mod hooks;
@@ -24,6 +25,7 @@ use crossterm::{
 
 use app::App;
 use config::{load_config, save_config};
+use deps::{check_dependencies, has_missing_required};
 use git::{fetch_worktrees, remove_worktree};
 use github::{close_issue, create_issue, fetch_issues, fetch_prs, fetch_repos};
 use hooks::start_event_socket;
@@ -32,7 +34,7 @@ use models::{
     RepoSelectPhase, Screen, SessionStates, REFRESH_INTERVAL, SOCKET_PATH,
 };
 use session::{attach_tmux_session, create_worktree_and_session, fetch_sessions};
-use ui::{ui, ui_repo_select};
+use ui::{ui, ui_dependencies, ui_repo_select};
 
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -48,13 +50,21 @@ fn main() -> Result<()> {
         ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(io::stdout()))?;
     let mut app = App::new(session_states);
 
-    // Load saved config
-    if let Some(config) = load_config() {
-        if !config.repo.is_empty() {
-            app.repo = config.repo.clone();
-            app.refresh_data();
-            app.selected_card = [0; 4];
-            app.screen = Screen::Board;
+    // Check external dependencies on startup
+    let initial_deps = check_dependencies();
+    if has_missing_required(&initial_deps) {
+        app.dependencies = initial_deps;
+        app.screen = Screen::Dependencies;
+    } else {
+        app.dependencies = initial_deps;
+        // Load saved config
+        if let Some(config) = load_config() {
+            if !config.repo.is_empty() {
+                app.repo = config.repo.clone();
+                app.refresh_data();
+                app.selected_card = [0; 4];
+                app.screen = Screen::Board;
+            }
         }
     }
 
@@ -62,6 +72,7 @@ fn main() -> Result<()> {
         terminal.draw(|frame| match app.screen {
             Screen::RepoSelect => ui_repo_select(frame, &app.repo_select),
             Screen::Board => ui(frame, &app),
+            Screen::Dependencies => ui_dependencies(frame, &app.dependencies),
         })?;
 
         // Auto-refresh when interval has elapsed and on Board screen in Normal mode
@@ -148,6 +159,28 @@ fn main() -> Result<()> {
             }
 
             match app.screen {
+                Screen::Dependencies => match key.code {
+                    KeyCode::Char('q') | KeyCode::Esc => {
+                        if app.repo.is_empty() {
+                            break;
+                        } else {
+                            app.screen = Screen::Board;
+                        }
+                    }
+                    KeyCode::Char('r') | KeyCode::Char('R') => {
+                        app.dependencies = check_dependencies();
+                    }
+                    KeyCode::Enter => {
+                        if has_missing_required(&app.dependencies) {
+                            // Stay on deps screen
+                        } else if app.repo.is_empty() {
+                            app.screen = Screen::RepoSelect;
+                        } else {
+                            app.screen = Screen::Board;
+                        }
+                    }
+                    _ => {}
+                },
                 Screen::RepoSelect => {
                     match app.repo_select.phase {
                         RepoSelectPhase::Typing => match key.code {
@@ -285,6 +318,10 @@ fn main() -> Result<()> {
                                 KeyCode::Char('R') => {
                                     app.refresh_data();
                                     app.status_message = Some("Refreshed".to_string());
+                                }
+                                KeyCode::Char('D') => {
+                                    app.dependencies = check_dependencies();
+                                    app.screen = Screen::Dependencies;
                                 }
                                 KeyCode::Char('/') => {
                                     app.mode = Mode::Filtering {

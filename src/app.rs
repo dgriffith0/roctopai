@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::sync::mpsc;
 use std::time::Instant;
 
+use crate::deps::Dependency;
 use crate::git::{cleanup_merged_worktrees, fetch_worktrees};
 use crate::github::{fetch_issues, fetch_prs};
 use crate::hooks::ensure_hook_script;
@@ -34,6 +35,7 @@ pub struct App {
     pub pr_assignee_filter: AssigneeFilter,
     pub issue_submit_rx: Option<mpsc::Receiver<IssueSubmitResult>>,
     pub spinner_tick: usize,
+    pub dependencies: Vec<Dependency>,
 }
 
 impl App {
@@ -64,6 +66,7 @@ impl App {
             pr_assignee_filter: AssigneeFilter::All,
             issue_submit_rx: None,
             spinner_tick: 0,
+            dependencies: Vec::new(),
         }
     }
 
