@@ -1320,9 +1320,12 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
             .borders(Borders::ALL)
             .border_style(editor_border)
             .title(" Command ");
+        let editor_placeholder = std::env::var("EDITOR")
+            .map(|e| format!("{e} {{directory}}"))
+            .unwrap_or_else(|_| DEFAULT_EDITOR_COMMAND.to_string());
         let editor_spans = if config_edit.editor_command.is_empty() && !editor_active {
             vec![Span::styled(
-                DEFAULT_EDITOR_COMMAND,
+                editor_placeholder,
                 Style::default()
                     .fg(Color::DarkGray)
                     .add_modifier(Modifier::BOLD),

@@ -80,8 +80,15 @@ pub fn get_verify_command(repo: &str) -> Option<String> {
 }
 
 pub fn get_editor_command(repo: &str) -> Option<String> {
-    let config = load_config()?;
-    config.editor_commands.get(repo).cloned()
+    let config = load_config();
+    let saved = config.and_then(|c| c.editor_commands.get(repo).cloned());
+    if saved.is_some() {
+        return saved;
+    }
+    // Fall back to $EDITOR environment variable
+    std::env::var("EDITOR")
+        .ok()
+        .map(|editor| format!("{editor} {{directory}}"))
 }
 
 pub fn set_editor_command(repo: &str, command: &str) -> Result<()> {
