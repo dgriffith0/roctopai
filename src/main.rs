@@ -24,17 +24,17 @@ use crossterm::{
 };
 
 use app::App;
-use config::{load_config, save_config};
+use config::{get_verify_command, load_config, save_config, set_verify_command};
 use deps::{check_dependencies, has_missing_required};
 use git::{fetch_worktrees, remove_worktree};
 use github::{close_issue, create_issue, fetch_issues, fetch_prs, fetch_repos};
 use hooks::start_event_socket;
 use models::{
-    ConfirmAction, ConfirmModal, IssueModal, IssueSubmitResult, MergeStrategy, Mode,
-    RepoSelectPhase, Screen, SessionStates, REFRESH_INTERVAL, SOCKET_PATH,
+    ConfigEditState, ConfirmAction, ConfirmModal, IssueModal, IssueSubmitResult, MergeStrategy,
+    Mode, RepoSelectPhase, Screen, SessionStates, REFRESH_INTERVAL, SOCKET_PATH,
 };
 use session::{attach_tmux_session, create_worktree_and_session, fetch_sessions};
-use ui::{ui, ui_dependencies, ui_repo_select};
+use ui::{ui, ui_configuration, ui_dependencies, ui_repo_select};
 
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -73,6 +73,7 @@ fn main() -> Result<()> {
             Screen::RepoSelect => ui_repo_select(frame, &app.repo_select),
             Screen::Board => ui(frame, &app),
             Screen::Dependencies => ui_dependencies(frame, &app.dependencies),
+            Screen::Configuration => ui_configuration(frame, &app),
         })?;
 
         // Auto-refresh when interval has elapsed and on Board screen in Normal mode
@@ -181,6 +182,41 @@ fn main() -> Result<()> {
                     }
                     _ => {}
                 },
+                Screen::Configuration => {
+                    if let Some(config_edit) = &mut app.config_edit {
+                        match key.code {
+                            KeyCode::Esc => {
+                                app.config_edit = None;
+                                app.screen = Screen::Board;
+                            }
+                            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                let cmd = config_edit.verify_command.trim().to_string();
+                                let repo = app.repo.clone();
+                                if cmd.is_empty() {
+                                    // Remove verify command for this repo
+                                    if let Some(mut config) = load_config() {
+                                        config.verify_commands.remove(&repo);
+                                        let _ = config::save_full_config(&config);
+                                    }
+                                    app.status_message = Some("Cleared verify command".to_string());
+                                } else {
+                                    let _ = set_verify_command(&repo, &cmd);
+                                    app.status_message =
+                                        Some(format!("Saved verify command: {}", cmd));
+                                }
+                                app.config_edit = None;
+                                app.screen = Screen::Board;
+                            }
+                            KeyCode::Backspace => {
+                                config_edit.verify_command.pop();
+                            }
+                            KeyCode::Char(c) => {
+                                config_edit.verify_command.push(c);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 Screen::RepoSelect => {
                     match app.repo_select.phase {
                         RepoSelectPhase::Typing => match key.code {
@@ -415,30 +451,48 @@ fn main() -> Result<()> {
                                 KeyCode::Char('v') if app.active_section == 1 => {
                                     if let Some(card) = app.worktrees.get(app.selected_card[1]) {
                                         let worktree_path = card.description.clone();
-                                        let result = Command::new("alacritty")
-                                            .args([
-                                                "--working-directory",
-                                                &worktree_path,
-                                                "-e",
-                                                "cargo",
-                                                "run",
-                                            ])
-                                            .spawn();
-                                        match result {
-                                            Ok(_) => {
-                                                app.status_message = Some(format!(
-                                                    "Launched cargo run in Alacritty for '{}'",
-                                                    card.title
-                                                ));
+                                        if let Some(cmd) = get_verify_command(&app.repo) {
+                                            // Split command into program and args
+                                            let parts: Vec<&str> = cmd.split_whitespace().collect();
+                                            if let Some((program, args)) = parts.split_first() {
+                                                let mut alacritty_args = vec![
+                                                    "--working-directory",
+                                                    &worktree_path,
+                                                    "-e",
+                                                ];
+                                                alacritty_args.push(program);
+                                                alacritty_args.extend(args);
+                                                let result = Command::new("alacritty")
+                                                    .args(&alacritty_args)
+                                                    .spawn();
+                                                match result {
+                                                    Ok(_) => {
+                                                        app.status_message = Some(format!(
+                                                            "Launched '{}' in Alacritty for '{}'",
+                                                            cmd, card.title
+                                                        ));
+                                                    }
+                                                    Err(e) => {
+                                                        app.status_message = Some(format!(
+                                                            "Failed to launch Alacritty: {}",
+                                                            e
+                                                        ));
+                                                    }
+                                                }
                                             }
-                                            Err(e) => {
-                                                app.status_message = Some(format!(
-                                                    "Failed to launch Alacritty: {}",
-                                                    e
-                                                ));
-                                            }
+                                        } else {
+                                            // No verify command configured — prompt user
+                                            app.mode = Mode::EditingVerifyCommand {
+                                                input: String::new(),
+                                            };
                                         }
                                     }
+                                }
+                                KeyCode::Char('C') => {
+                                    let current_cmd =
+                                        get_verify_command(&app.repo).unwrap_or_default();
+                                    app.config_edit = Some(ConfigEditState::new(current_cmd));
+                                    app.screen = Screen::Configuration;
                                 }
                                 // PR actions: 'o' to open in browser, 'r' to mark ready
                                 KeyCode::Char('o') if app.active_section == 3 => {
@@ -897,6 +951,43 @@ fn main() -> Result<()> {
                                 }
                             }
                         }
+                        Mode::EditingVerifyCommand { input } => match key.code {
+                            KeyCode::Esc => {
+                                app.mode = Mode::Normal;
+                            }
+                            KeyCode::Enter => {
+                                let cmd = input.trim().to_string();
+                                if !cmd.is_empty() {
+                                    let repo = app.repo.clone();
+                                    let _ = set_verify_command(&repo, &cmd);
+                                    app.status_message =
+                                        Some(format!("Saved verify command: {}", cmd));
+
+                                    // Now execute the verify command
+                                    if let Some(card) = app.worktrees.get(app.selected_card[1]) {
+                                        let worktree_path = card.description.clone();
+                                        let parts: Vec<&str> = cmd.split_whitespace().collect();
+                                        if let Some((program, args)) = parts.split_first() {
+                                            let mut alacritty_args =
+                                                vec!["--working-directory", &worktree_path, "-e"];
+                                            alacritty_args.push(program);
+                                            alacritty_args.extend(args);
+                                            let _ = Command::new("alacritty")
+                                                .args(&alacritty_args)
+                                                .spawn();
+                                        }
+                                    }
+                                }
+                                app.mode = Mode::Normal;
+                            }
+                            KeyCode::Backspace => {
+                                input.pop();
+                            }
+                            KeyCode::Char(c) => {
+                                input.push(c);
+                            }
+                            _ => {}
+                        },
                     }
                 }
             }

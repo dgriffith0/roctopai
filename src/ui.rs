@@ -10,6 +10,7 @@ use ratatui::{
 };
 
 use crate::app::App;
+use crate::config::config_path;
 use crate::deps::Dependency;
 use crate::models::{
     card_matches, Card, ConfirmModal, IssueModal, Mode, RepoSelectPhase, RepoSelectState,
@@ -474,6 +475,8 @@ pub fn ui(frame: &mut Frame, app: &App) {
                 Span::styled(" New issue ", desc_style),
                 Span::styled(" D ", key_style),
                 Span::styled(" Deps ", desc_style),
+                Span::styled(" C ", key_style),
+                Span::styled(" Config ", desc_style),
             ]
         }
         Mode::Filtering { .. } => vec![
@@ -494,6 +497,12 @@ pub fn ui(frame: &mut Frame, app: &App) {
             Span::styled(" y ", key_accent),
             Span::styled(" Confirm ", desc_style),
             Span::styled(" n/Esc ", key_style),
+            Span::styled(" Cancel ", desc_style),
+        ],
+        Mode::EditingVerifyCommand { .. } => vec![
+            Span::styled(" Enter ", key_accent),
+            Span::styled(" Save & run ", desc_style),
+            Span::styled(" Esc ", key_style),
             Span::styled(" Cancel ", desc_style),
         ],
     };
@@ -527,7 +536,7 @@ pub fn ui(frame: &mut Frame, app: &App) {
             }
             1 => {
                 area_spans.push(Span::styled(" v ", key_accent));
-                area_spans.push(Span::styled(" Verify (cargo run) ", desc_style));
+                area_spans.push(Span::styled(" Verify ", desc_style));
                 area_spans.push(Span::styled(" d ", key_style));
                 area_spans.push(Span::styled(" Remove worktree ", desc_style));
             }
@@ -599,6 +608,11 @@ pub fn ui(frame: &mut Frame, app: &App) {
     // Render confirm modal overlay if open
     if let Some(modal) = &app.confirm_modal {
         ui_confirm_modal(frame, modal);
+    }
+
+    // Render verify command prompt overlay if in EditingVerifyCommand mode
+    if let Mode::EditingVerifyCommand { input } = &app.mode {
+        ui_verify_prompt(frame, input);
     }
 }
 
@@ -957,4 +971,171 @@ fn render_card(frame: &mut Frame, area: Rect, card: &Card, is_selected: bool, is
         Style::default().fg(Color::Gray),
     ));
     frame.render_widget(desc, lines[1]);
+}
+
+fn ui_verify_prompt(frame: &mut Frame, input: &str) {
+    let area = centered_rect(50, 20, frame.area());
+
+    frame.render_widget(Clear, area);
+
+    let outer_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .title(" Set Verify Command ")
+        .title_style(
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )
+        .padding(Padding::new(1, 1, 1, 0));
+    let inner = outer_block.inner(area);
+    frame.render_widget(outer_block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // label
+            Constraint::Length(3), // input
+            Constraint::Min(1),    // hint
+        ])
+        .split(inner);
+
+    let label = Paragraph::new(Line::from(vec![Span::styled(
+        "No verify command configured for this repo. Enter a command:",
+        Style::default().fg(Color::White),
+    )]));
+    frame.render_widget(label, chunks[0]);
+
+    let input_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::White))
+        .title(" Command ");
+    let input_text = Paragraph::new(Line::from(vec![
+        Span::styled(
+            input,
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("_", Style::default().fg(Color::Cyan)),
+    ]))
+    .block(input_block);
+    frame.render_widget(input_text, chunks[1]);
+
+    let hint = Paragraph::new(Line::from(vec![Span::styled(
+        "e.g. cargo run, npm start, make run  |  Enter: save & run  Esc: cancel",
+        Style::default().fg(Color::DarkGray),
+    )]));
+    frame.render_widget(hint, chunks[2]);
+}
+
+pub fn ui_configuration(frame: &mut Frame, app: &App) {
+    let area = frame.area();
+
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(0),
+            Constraint::Length(2),
+        ])
+        .split(area);
+
+    // Title bar
+    let title_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(" Configuration ");
+    let title_text = Paragraph::new(Line::from(vec![Span::styled(
+        format!("  Configuration for {}", app.repo),
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    )]))
+    .block(title_block);
+    frame.render_widget(title_text, vertical[0]);
+
+    // Content
+    let content_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .padding(Padding::new(2, 2, 1, 0));
+    let inner = content_block.inner(vertical[1]);
+    frame.render_widget(content_block, vertical[1]);
+
+    if let Some(config_edit) = &app.config_edit {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1), // label
+                Constraint::Length(3), // input
+                Constraint::Length(2), // spacing
+                Constraint::Length(1), // config file path
+                Constraint::Min(0),
+            ])
+            .split(inner);
+
+        let label = Paragraph::new(Line::from(vec![Span::styled(
+            "Verify Command",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]));
+        frame.render_widget(label, chunks[0]);
+
+        let input_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .title(" Command ");
+        let input_text = Paragraph::new(Line::from(vec![
+            Span::styled(
+                &config_edit.verify_command,
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("_", Style::default().fg(Color::Cyan)),
+        ]))
+        .block(input_block);
+        frame.render_widget(input_text, chunks[1]);
+
+        let path_label = Paragraph::new(Line::from(vec![
+            Span::styled("Config file: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                config_path().to_string_lossy().to_string(),
+                Style::default().fg(Color::Gray),
+            ),
+        ]));
+        frame.render_widget(path_label, chunks[3]);
+    }
+
+    // Bottom hint bar
+    let bottom_rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Length(1)])
+        .split(vertical[2]);
+
+    let key_style = Style::default()
+        .fg(Color::White)
+        .bg(Color::Rgb(60, 60, 60))
+        .add_modifier(Modifier::BOLD);
+    let desc_style = Style::default().fg(Color::Gray);
+    let key_accent = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Green)
+        .add_modifier(Modifier::BOLD);
+
+    let hints = vec![
+        Span::styled(" Ctrl+S ", key_accent),
+        Span::styled(" Save ", desc_style),
+        Span::styled(" Esc ", key_style),
+        Span::styled(" Cancel ", desc_style),
+    ];
+
+    frame.render_widget(Paragraph::new(Line::from(hints)), bottom_rows[0]);
 }

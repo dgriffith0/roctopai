@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -7,6 +8,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize)]
 pub struct Config {
     pub repo: String,
+    #[serde(default)]
+    pub verify_commands: HashMap<String, String>,
 }
 
 pub fn config_path() -> PathBuf {
@@ -23,13 +26,41 @@ pub fn load_config() -> Option<Config> {
 }
 
 pub fn save_config(repo: &str) -> Result<()> {
+    // Load existing config to preserve verify_commands
+    let verify_commands = load_config().map(|c| c.verify_commands).unwrap_or_default();
     let path = config_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     let config = Config {
         repo: repo.to_string(),
+        verify_commands,
     };
     fs::write(path, serde_json::to_string_pretty(&config)?)?;
     Ok(())
+}
+
+pub fn save_full_config(config: &Config) -> Result<()> {
+    let path = config_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, serde_json::to_string_pretty(&config)?)?;
+    Ok(())
+}
+
+pub fn get_verify_command(repo: &str) -> Option<String> {
+    let config = load_config()?;
+    config.verify_commands.get(repo).cloned()
+}
+
+pub fn set_verify_command(repo: &str, command: &str) -> Result<()> {
+    let mut config = load_config().unwrap_or(Config {
+        repo: repo.to_string(),
+        verify_commands: HashMap::new(),
+    });
+    config
+        .verify_commands
+        .insert(repo.to_string(), command.to_string());
+    save_full_config(&config)
 }

@@ -7,8 +7,8 @@ use crate::git::{cleanup_merged_worktrees, fetch_worktrees};
 use crate::github::{fetch_issues, fetch_prs};
 use crate::hooks::ensure_hook_script;
 use crate::models::{
-    AssigneeFilter, Card, ConfirmModal, IssueModal, IssueSubmitResult, Mode, RepoSelectState,
-    Screen, SessionStates, StateFilter,
+    AssigneeFilter, Card, ConfigEditState, ConfirmModal, IssueModal, IssueSubmitResult, Mode,
+    RepoSelectState, Screen, SessionStates, StateFilter,
 };
 use crate::session::fetch_sessions;
 
@@ -36,6 +36,7 @@ pub struct App {
     pub issue_submit_rx: Option<mpsc::Receiver<IssueSubmitResult>>,
     pub spinner_tick: usize,
     pub dependencies: Vec<Dependency>,
+    pub config_edit: Option<ConfigEditState>,
 }
 
 impl App {
@@ -67,6 +68,7 @@ impl App {
             issue_submit_rx: None,
             spinner_tick: 0,
             dependencies: Vec::new(),
+            config_edit: None,
         }
     }
 

@@ -116,6 +116,7 @@ pub enum Mode {
     Filtering { query: String },
     CreatingIssue,
     Confirming,
+    EditingVerifyCommand { input: String },
 }
 
 #[derive(PartialEq)]
@@ -123,6 +124,17 @@ pub enum Screen {
     RepoSelect,
     Board,
     Dependencies,
+    Configuration,
+}
+
+pub struct ConfigEditState {
+    pub verify_command: String,
+}
+
+impl ConfigEditState {
+    pub fn new(verify_command: String) -> Self {
+        Self { verify_command }
+    }
 }
 
 #[derive(PartialEq)]
