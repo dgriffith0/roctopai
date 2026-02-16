@@ -328,7 +328,7 @@ fn main() -> Result<()> {
                                         query: String::new(),
                                     };
                                 }
-                                KeyCode::Char('n') if app.active_section == 0 => {
+                                KeyCode::Char('n') => {
                                     app.mode = Mode::CreatingIssue;
                                     app.issue_modal = Some(IssueModal::new());
                                 }

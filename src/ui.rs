@@ -470,6 +470,8 @@ pub fn ui(frame: &mut Frame, app: &App) {
                 Span::styled(" Change repo ", desc_style),
                 Span::styled(" R ", key_style),
                 Span::styled(" Refresh ", desc_style),
+                Span::styled(" n ", key_accent),
+                Span::styled(" New issue ", desc_style),
                 Span::styled(" D ", key_style),
                 Span::styled(" Deps ", desc_style),
             ]
@@ -514,8 +516,6 @@ pub fn ui(frame: &mut Frame, app: &App) {
 
         match app.active_section {
             0 => {
-                area_spans.push(Span::styled(" n ", key_accent));
-                area_spans.push(Span::styled(" New issue ", desc_style));
                 area_spans.push(Span::styled(" w ", key_accent));
                 area_spans.push(Span::styled(" Worktree+Claude ", desc_style));
                 area_spans.push(Span::styled(" d ", key_style));
