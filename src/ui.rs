@@ -285,6 +285,7 @@ pub fn ui_dependencies(frame: &mut Frame, deps: &[Dependency]) {
         };
 
         let required_marker = if dep.required { "" } else { " (optional)" };
+        let description = format!("{}{}", dep.description, required_marker);
         let version = dep.version.as_deref().unwrap_or("-");
 
         let line = Line::from(vec![
@@ -301,7 +302,7 @@ pub fn ui_dependencies(frame: &mut Frame, deps: &[Dependency]) {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!("{}{:<40} ", dep.description, required_marker),
+                format!("{:<46} ", description),
                 Style::default().fg(Color::Gray),
             ),
             Span::styled(version, Style::default().fg(Color::DarkGray)),
