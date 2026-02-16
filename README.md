@@ -29,7 +29,6 @@ Octopai checks for these on startup and will tell you what's missing.
 | [gh](https://cli.github.com/) (authenticated) | All GitHub operations — fetching issues, creating PRs, merging, etc. |
 | [git](https://git-scm.com/) | Worktree creation and branch management |
 | [tmux](https://github.com/tmux/tmux) | Each AI session runs in its own tmux window so octopai can monitor and attach to it |
-| [nvim](https://neovim.io/) | Default editor opened in worktree sessions |
 | [python3](https://www.python.org/) | Runs the hook script that reports session status back to the board via Unix socket |
 | [claude](https://docs.anthropic.com/en/docs/claude-code) **or** [cursor](https://www.cursor.com/) | AI coding assistant — at least one is required |
 

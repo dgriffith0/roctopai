@@ -11,6 +11,33 @@ pub fn get_repo_name(repo: &str) -> &str {
     repo.split('/').last().unwrap_or(repo)
 }
 
+/// Detect the GitHub "owner/repo" for the current working directory by
+/// asking `gh` which repository this directory belongs to.
+pub fn detect_current_repo() -> Option<String> {
+    let output = Command::new("gh")
+        .args([
+            "repo",
+            "view",
+            "--json",
+            "nameWithOwner",
+            "-q",
+            ".nameWithOwner",
+        ])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let repo = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if repo.is_empty() || !repo.contains('/') {
+        return None;
+    }
+
+    Some(repo)
+}
+
 pub fn fetch_worktrees() -> Vec<Card> {
     let output = Command::new("git")
         .args(["worktree", "list", "--porcelain"])
@@ -124,6 +151,47 @@ pub fn cleanup_merged_worktrees(repo: &str, worktrees: &[Card]) -> Vec<String> {
     }
 
     cleaned
+}
+
+/// Check how many commits the local main/master branch is behind its remote tracking branch.
+/// Runs `git fetch` first to ensure we have the latest remote state.
+pub fn fetch_main_behind_count() -> usize {
+    // Fetch latest from remote (quiet, don't fail if offline)
+    let _ = Command::new("git").args(["fetch", "--quiet"]).output();
+
+    // Determine main branch name
+    let branch = if Command::new("git")
+        .args(["rev-parse", "--verify", "refs/heads/main"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        "main"
+    } else if Command::new("git")
+        .args(["rev-parse", "--verify", "refs/heads/master"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        "master"
+    } else {
+        return 0;
+    };
+
+    // Count commits that are on the remote but not on the local branch
+    let local = format!("refs/heads/{}", branch);
+    let remote = format!("refs/remotes/origin/{}", branch);
+    let output = Command::new("git")
+        .args(["rev-list", "--count", &format!("{}..{}", local, remote)])
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
+            .trim()
+            .parse::<usize>()
+            .unwrap_or(0),
+        _ => 0,
+    }
 }
 
 pub fn trust_directory(path: &str) -> std::result::Result<(), String> {

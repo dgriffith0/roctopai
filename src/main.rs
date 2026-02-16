@@ -29,7 +29,7 @@ use config::{
     save_config, set_editor_command, set_verify_command,
 };
 use deps::{check_dependencies, has_missing_required};
-use git::{fetch_worktrees, remove_worktree};
+use git::{detect_current_repo, fetch_worktrees, remove_worktree};
 use github::{close_issue, create_issue, fetch_issues, fetch_prs, fetch_repos};
 use hooks::start_event_socket;
 use models::{
@@ -64,14 +64,17 @@ fn main() -> Result<()> {
         app.screen = Screen::Dependencies;
     } else {
         app.dependencies = initial_deps;
-        // Load saved config
-        if let Some(config) = load_config() {
-            if !config.repo.is_empty() {
-                app.repo = config.repo.clone();
-                app.refresh_data();
-                app.selected_card = [0; 4];
-                app.screen = Screen::Board;
-            }
+        // Load saved config, falling back to detecting the current git repo
+        let configured_repo = load_config().map(|c| c.repo).filter(|r| !r.is_empty());
+
+        let repo = configured_repo.or_else(detect_current_repo);
+
+        if let Some(repo) = repo {
+            app.repo = repo.clone();
+            let _ = save_config(&repo);
+            app.refresh_data();
+            app.selected_card = [0; 4];
+            app.screen = Screen::Board;
         }
     }
 

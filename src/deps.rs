@@ -13,7 +13,6 @@ pub fn check_dependencies() -> Vec<Dependency> {
         check_dep("gh", "gh", "GitHub CLI for issue/PR management", true),
         check_dep("git", "git", "Version control with worktree support", true),
         check_dep("tmux", "tmux", "Terminal multiplexer for sessions", true),
-        check_dep("nvim", "nvim", "Editor launched in worktree sessions", true),
     ];
 
     // Require at least one AI coding assistant (claude or cursor)
