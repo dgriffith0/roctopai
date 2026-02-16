@@ -449,6 +449,95 @@ fn expand_template(
         .replace("{worktree_path}", worktree_path)
 }
 
+/// Create a new multiplexer session for an existing worktree.
+///
+/// Unlike `create_worktree_and_session`, this does not create the worktree or
+/// branch — it assumes they already exist. It sets up hooks, trusts the
+/// directory, builds the prompt, and launches the session command.
+#[allow(clippy::too_many_arguments)]
+pub fn create_session_for_worktree(
+    repo: &str,
+    number: u64,
+    title: &str,
+    body: &str,
+    branch: &str,
+    worktree_path: &str,
+    hook_script: Option<&str>,
+    pr_ready: bool,
+    session_command: Option<&str>,
+    mux: Multiplexer,
+) -> std::result::Result<(), String> {
+    // Pre-trust the worktree directory for Claude
+    let _ = trust_directory(worktree_path);
+
+    // Write Claude hook config for event socket integration
+    if let Some(script) = hook_script {
+        let _ = write_worktree_hook_config(worktree_path, script);
+    }
+
+    // Auto-assign the issue to the current user
+    let _ = Command::new("gh")
+        .args([
+            "issue",
+            "edit",
+            "--repo",
+            repo,
+            &number.to_string(),
+            "--add-assignee",
+            "@me",
+        ])
+        .output();
+
+    // Create session with a shell in the worktree directory
+    mux.create_session(branch, worktree_path)?;
+
+    // Build the Claude prompt and write to a temp file
+    let body_clean = if body.is_empty() {
+        "No description provided.".to_string()
+    } else {
+        body.lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+
+    let pr_instruction = if pr_ready {
+        "open a pull request"
+    } else {
+        "open a draft pull request"
+    };
+
+    let prompt = format!(
+        "You are working on GitHub issue #{} for the repo {}. Title: {}. {} Please investigate the codebase and implement a solution for this issue. When you are confident the problem is solved, commit your changes and {} with a clear title and description that explains what was changed and why. Reference the issue with 'Closes #{}' in the PR body. Use '--assignee @me' when creating the pull request to auto-assign it.",
+        number, repo, title, body_clean, pr_instruction, number
+    );
+
+    // Write prompt to a temp file for safe shell expansion
+    let prompt_file = format!("/tmp/octopai-prompt-{}.txt", number);
+    fs::write(&prompt_file, &prompt).map_err(|e| format!("Failed to write prompt file: {}", e))?;
+
+    // Send session command to the single pane
+    let template = session_command.unwrap_or(DEFAULT_CLAUDE_COMMAND);
+    let shell_cmd = expand_template(
+        template,
+        &prompt_file,
+        number,
+        repo,
+        title,
+        &body_clean,
+        branch,
+        worktree_path,
+    );
+
+    // Wait for shell to initialize, then send the command
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    mux.send_keys(branch, &shell_cmd);
+
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn create_worktree_and_session(
     repo: &str,

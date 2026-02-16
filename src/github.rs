@@ -245,6 +245,34 @@ pub fn create_issue(repo: &str, title: &str, body: &str) -> std::result::Result<
     Ok(number)
 }
 
+/// Fetch a single issue's title and body by number.
+pub fn fetch_issue(repo: &str, number: u64) -> std::result::Result<(String, String), String> {
+    let output = Command::new("gh")
+        .args([
+            "issue",
+            "view",
+            &number.to_string(),
+            "--repo",
+            repo,
+            "--json",
+            "title,body",
+        ])
+        .output()
+        .map_err(|e| format!("Failed to run gh: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("gh error: {}", stderr.trim()));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let val: serde_json::Value =
+        serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse JSON: {}", e))?;
+    let title = val["title"].as_str().unwrap_or("").to_string();
+    let body = val["body"].as_str().unwrap_or("").to_string();
+    Ok((title, body))
+}
+
 pub fn close_issue(repo: &str, number: u64) -> std::result::Result<(), String> {
     let output = Command::new("gh")
         .args(["issue", "close", "--repo", repo, &number.to_string()])
