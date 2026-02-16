@@ -16,6 +16,7 @@ use crate::models::{
     card_matches, Card, ConfirmModal, IssueModal, Mode, RepoSelectPhase, RepoSelectState,
     REFRESH_INTERVAL,
 };
+use crate::session::{DEFAULT_CLAUDE_COMMAND, TEMPLATE_FIELDS};
 
 pub fn ui_repo_select(frame: &mut Frame, state: &RepoSelectState) {
     let area = frame.area();
@@ -1141,14 +1142,18 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
                 Constraint::Length(1), // pr ready label
                 Constraint::Length(1), // pr ready toggle
                 Constraint::Length(1), // spacing
-                Constraint::Length(1), // config file path
-                Constraint::Min(0),
+                Constraint::Length(1), // claude command label
+                Constraint::Length(3), // claude command input
+                Constraint::Length(1), // spacing
+                Constraint::Length(1), // template fields header
+                Constraint::Min(0),    // template fields list + config path
             ])
             .split(inner);
 
         let verify_active = config_edit.active_field == 0;
         let editor_active = config_edit.active_field == 1;
         let pr_ready_active = config_edit.active_field == 2;
+        let claude_active = config_edit.active_field == 3;
 
         // Verify command field
         let verify_label = Paragraph::new(Line::from(vec![Span::styled(
@@ -1259,14 +1264,85 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
         ]));
         frame.render_widget(pr_ready_text, chunks[7]);
 
-        let path_label = Paragraph::new(Line::from(vec![
+        // Claude command field
+        let claude_label = Paragraph::new(Line::from(vec![Span::styled(
+            "Claude Command",
+            Style::default()
+                .fg(if claude_active {
+                    Color::Cyan
+                } else {
+                    Color::Gray
+                })
+                .add_modifier(Modifier::BOLD),
+        )]));
+        frame.render_widget(claude_label, chunks[9]);
+
+        let claude_border = if claude_active {
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        let claude_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(claude_border)
+            .title(" Command ");
+        let display_cmd = if config_edit.claude_command.is_empty() {
+            DEFAULT_CLAUDE_COMMAND.to_string()
+        } else {
+            config_edit.claude_command.clone()
+        };
+        let display_color = if config_edit.claude_command.is_empty() && !claude_active {
+            Color::DarkGray
+        } else {
+            Color::White
+        };
+        let mut claude_spans = vec![Span::styled(
+            if config_edit.claude_command.is_empty() && claude_active {
+                ""
+            } else {
+                &display_cmd
+            },
+            Style::default()
+                .fg(display_color)
+                .add_modifier(Modifier::BOLD),
+        )];
+        if claude_active {
+            claude_spans.push(Span::styled("_", Style::default().fg(Color::Cyan)));
+        }
+        let claude_text = Paragraph::new(Line::from(claude_spans)).block(claude_block);
+        frame.render_widget(claude_text, chunks[10]);
+
+        // Template fields header
+        let fields_header = Paragraph::new(Line::from(vec![Span::styled(
+            "Available template fields:",
+            Style::default()
+                .fg(Color::Gray)
+                .add_modifier(Modifier::BOLD),
+        )]));
+        frame.render_widget(fields_header, chunks[12]);
+
+        // Template fields list + config path in the remaining space
+        let mut lines: Vec<Line> = TEMPLATE_FIELDS
+            .iter()
+            .map(|(field, desc)| {
+                Line::from(vec![
+                    Span::styled(format!("  {} ", field), Style::default().fg(Color::Cyan)),
+                    Span::styled(format!("- {}", desc), Style::default().fg(Color::DarkGray)),
+                ])
+            })
+            .collect();
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
             Span::styled("Config file: ", Style::default().fg(Color::DarkGray)),
             Span::styled(
                 config_path().to_string_lossy().to_string(),
                 Style::default().fg(Color::Gray),
             ),
         ]));
-        frame.render_widget(path_label, chunks[9]);
+        let fields_list = Paragraph::new(lines);
+        frame.render_widget(fields_list, chunks[13]);
     }
 
     // Bottom hint bar

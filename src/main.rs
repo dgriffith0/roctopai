@@ -25,8 +25,8 @@ use crossterm::{
 
 use app::App;
 use config::{
-    get_editor_command, get_pr_ready, get_verify_command, load_config, save_config,
-    set_editor_command, set_verify_command,
+    get_claude_command, get_editor_command, get_pr_ready, get_verify_command, load_config,
+    save_config, set_editor_command, set_verify_command,
 };
 use deps::{check_dependencies, has_missing_required};
 use git::{fetch_worktrees, remove_worktree};
@@ -193,11 +193,12 @@ fn main() -> Result<()> {
                                 app.screen = Screen::Board;
                             }
                             KeyCode::Tab => {
-                                config_edit.active_field = (config_edit.active_field + 1) % 3;
+                                config_edit.active_field = (config_edit.active_field + 1) % 4;
                             }
                             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                                 let verify_cmd = config_edit.verify_command.trim().to_string();
                                 let editor_cmd = config_edit.editor_command.trim().to_string();
+                                let claude_cmd = config_edit.claude_command.trim().to_string();
                                 let repo = app.repo.clone();
 
                                 let pr_ready = config_edit.pr_ready;
@@ -222,6 +223,13 @@ fn main() -> Result<()> {
                                     } else {
                                         config.pr_ready.remove(&repo);
                                     }
+                                    if claude_cmd.is_empty() {
+                                        config.claude_commands.remove(&repo);
+                                    } else {
+                                        config
+                                            .claude_commands
+                                            .insert(repo.clone(), claude_cmd.clone());
+                                    }
                                     let _ = config::save_full_config(&config);
                                 }
 
@@ -235,6 +243,9 @@ fn main() -> Result<()> {
                                 }
                                 1 => {
                                     config_edit.editor_command.pop();
+                                }
+                                3 => {
+                                    config_edit.claude_command.pop();
                                 }
                                 _ => {}
                             },
@@ -250,6 +261,9 @@ fn main() -> Result<()> {
                                 }
                                 1 => {
                                     config_edit.editor_command.push(c);
+                                }
+                                3 => {
+                                    config_edit.claude_command.push(c);
                                 }
                                 _ => {}
                             },
@@ -420,6 +434,7 @@ fn main() -> Result<()> {
                                                     .unwrap_or_default();
                                                 let repo = app.repo.clone();
                                                 let pr_ready = get_pr_ready(&repo);
+                                                let claude_cmd = get_claude_command(&repo);
                                                 match create_worktree_and_session(
                                                     &repo,
                                                     number,
@@ -427,6 +442,7 @@ fn main() -> Result<()> {
                                                     &body,
                                                     app.hook_script_path.as_deref(),
                                                     pr_ready,
+                                                    claude_cmd.as_deref(),
                                                 ) {
                                                     Ok(()) => {
                                                         app.worktrees = fetch_worktrees();
@@ -574,10 +590,13 @@ fn main() -> Result<()> {
                                     let current_editor =
                                         get_editor_command(&app.repo).unwrap_or_default();
                                     let current_pr_ready = get_pr_ready(&app.repo);
+                                    let current_claude =
+                                        get_claude_command(&app.repo).unwrap_or_default();
                                     app.config_edit = Some(ConfigEditState::new(
                                         current_verify,
                                         current_editor,
                                         current_pr_ready,
+                                        current_claude,
                                     ));
                                     app.screen = Screen::Configuration;
                                 }
@@ -990,6 +1009,7 @@ fn main() -> Result<()> {
                                             let body = modal.body.clone();
                                             let repo = app.repo.clone();
                                             let hook_script = app.hook_script_path.clone();
+                                            let claude_cmd = get_claude_command(&repo);
                                             let (tx, rx) = mpsc::channel();
                                             app.issue_submit_rx = Some(rx);
                                             std::thread::spawn(move || {
@@ -1004,6 +1024,7 @@ fn main() -> Result<()> {
                                                                 &body,
                                                                 hook_script.as_deref(),
                                                                 pr_ready,
+                                                                claude_cmd.as_deref(),
                                                             );
                                                         let _ =
                                                             tx.send(IssueSubmitResult::Success {

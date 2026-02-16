@@ -107,6 +107,44 @@ pub fn attach_tmux_session(session: &str) -> std::result::Result<(), String> {
     Ok(())
 }
 
+/// Default command template used when no custom claude command is configured.
+pub const DEFAULT_CLAUDE_COMMAND: &str =
+    "claude \"$(cat '{prompt_file}')\" --allowedTools Read,Edit,Bash";
+
+/// Available template fields for the claude command configuration.
+/// Each tuple is (field_name, description).
+pub const TEMPLATE_FIELDS: &[(&str, &str)] = &[
+    ("{prompt_file}", "Path to temp file containing the prompt"),
+    ("{issue_number}", "GitHub issue number"),
+    ("{repo}", "Full repo name (owner/repo)"),
+    ("{title}", "Issue title"),
+    ("{body}", "Cleaned issue body text"),
+    ("{branch}", "Branch name (e.g. issue-42)"),
+    ("{worktree_path}", "Path to the git worktree"),
+];
+
+/// Expand template fields in a command string.
+#[allow(clippy::too_many_arguments)]
+fn expand_template(
+    template: &str,
+    prompt_file: &str,
+    number: u64,
+    repo: &str,
+    title: &str,
+    body: &str,
+    branch: &str,
+    worktree_path: &str,
+) -> String {
+    template
+        .replace("{prompt_file}", prompt_file)
+        .replace("{issue_number}", &number.to_string())
+        .replace("{repo}", repo)
+        .replace("{title}", title)
+        .replace("{body}", body)
+        .replace("{branch}", branch)
+        .replace("{worktree_path}", worktree_path)
+}
+
 pub fn create_worktree_and_session(
     repo: &str,
     number: u64,
@@ -114,6 +152,7 @@ pub fn create_worktree_and_session(
     body: &str,
     hook_script: Option<&str>,
     pr_ready: bool,
+    claude_command: Option<&str>,
 ) -> std::result::Result<(), String> {
     let repo_name = get_repo_name(repo);
     let branch = format!("issue-{}", number);
@@ -189,9 +228,16 @@ pub fn create_worktree_and_session(
     fs::write(&prompt_file, &prompt).map_err(|e| format!("Failed to write prompt file: {}", e))?;
 
     // Send Claude command to the single pane
-    let shell_cmd = format!(
-        "claude \"$(cat '{}')\" --allowedTools Read,Edit,Bash",
-        prompt_file
+    let template = claude_command.unwrap_or(DEFAULT_CLAUDE_COMMAND);
+    let shell_cmd = expand_template(
+        template,
+        &prompt_file,
+        number,
+        repo,
+        title,
+        &body_clean,
+        &branch,
+        &worktree_path,
     );
 
     // Wait for shell to initialize, then send the command
