@@ -25,7 +25,6 @@ pub struct App {
     pub mode: Mode,
     pub issue_modal: Option<IssueModal>,
     pub confirm_modal: Option<ConfirmModal>,
-    pub status_message: Option<String>,
     pub last_refresh: Instant,
     pub session_states: SessionStates,
     pub hook_script_path: Option<String>,
@@ -59,7 +58,6 @@ impl App {
             mode: Mode::Normal,
             issue_modal: None,
             confirm_modal: None,
-            status_message: None,
             sessions: Vec::new(),
             last_refresh: Instant::now(),
             session_states,
@@ -89,7 +87,6 @@ impl App {
 
     pub fn set_status(&mut self, msg: String) {
         self.add_message(&msg);
-        self.status_message = Some(msg);
     }
 
     pub fn section_cards(&self, section: usize) -> &[Card] {
