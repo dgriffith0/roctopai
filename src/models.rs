@@ -131,14 +131,16 @@ pub enum Screen {
 pub struct ConfigEditState {
     pub verify_command: String,
     pub editor_command: String,
-    pub active_field: usize, // 0 = verify, 1 = editor
+    pub pr_ready: bool,
+    pub active_field: usize, // 0 = verify, 1 = editor, 2 = pr_ready
 }
 
 impl ConfigEditState {
-    pub fn new(verify_command: String, editor_command: String) -> Self {
+    pub fn new(verify_command: String, editor_command: String, pr_ready: bool) -> Self {
         Self {
             verify_command,
             editor_command,
+            pr_ready,
             active_field: 0,
         }
     }

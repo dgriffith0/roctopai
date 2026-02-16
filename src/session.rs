@@ -113,6 +113,7 @@ pub fn create_worktree_and_session(
     title: &str,
     body: &str,
     hook_script: Option<&str>,
+    pr_ready: bool,
 ) -> std::result::Result<(), String> {
     let repo_name = get_repo_name(repo);
     let branch = format!("issue-{}", number);
@@ -181,9 +182,15 @@ pub fn create_worktree_and_session(
             .join(" ")
     };
 
+    let pr_instruction = if pr_ready {
+        "open a pull request"
+    } else {
+        "open a draft pull request"
+    };
+
     let prompt = format!(
-        "You are working on GitHub issue #{} for the repo {}. Title: {}. {} Please investigate the codebase and implement a solution for this issue. When you are confident the problem is solved, commit your changes and open a draft pull request with a clear title and description that explains what was changed and why. Reference the issue with 'Closes #{}' in the PR body. Use '--assignee @me' when creating the pull request to auto-assign it.",
-        number, repo, title, body_clean, number
+        "You are working on GitHub issue #{} for the repo {}. Title: {}. {} Please investigate the codebase and implement a solution for this issue. When you are confident the problem is solved, commit your changes and {} with a clear title and description that explains what was changed and why. Reference the issue with 'Closes #{}' in the PR body. Use '--assignee @me' when creating the pull request to auto-assign it.",
+        number, repo, title, body_clean, pr_instruction, number
     );
 
     // Write prompt to a temp file for safe shell expansion

@@ -1138,6 +1138,9 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
                 Constraint::Length(1), // editor label
                 Constraint::Length(3), // editor input
                 Constraint::Length(1), // spacing
+                Constraint::Length(1), // pr ready label
+                Constraint::Length(1), // pr ready toggle
+                Constraint::Length(1), // spacing
                 Constraint::Length(1), // config file path
                 Constraint::Min(0),
             ])
@@ -1145,6 +1148,7 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
 
         let verify_active = config_edit.active_field == 0;
         let editor_active = config_edit.active_field == 1;
+        let pr_ready_active = config_edit.active_field == 2;
 
         // Verify command field
         let verify_label = Paragraph::new(Line::from(vec![Span::styled(
@@ -1218,6 +1222,43 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
         let editor_text = Paragraph::new(Line::from(editor_spans)).block(editor_block);
         frame.render_widget(editor_text, chunks[4]);
 
+        // PR Ready toggle field
+        let pr_ready_label = Paragraph::new(Line::from(vec![Span::styled(
+            "Open PRs as Ready (not draft)",
+            Style::default()
+                .fg(if pr_ready_active {
+                    Color::Cyan
+                } else {
+                    Color::Gray
+                })
+                .add_modifier(Modifier::BOLD),
+        )]));
+        frame.render_widget(pr_ready_label, chunks[6]);
+
+        let checkbox = if config_edit.pr_ready { "[x]" } else { "[ ]" };
+        let toggle_color = if pr_ready_active {
+            Color::White
+        } else {
+            Color::DarkGray
+        };
+        let pr_ready_text = Paragraph::new(Line::from(vec![
+            Span::styled(
+                checkbox,
+                Style::default()
+                    .fg(toggle_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                if config_edit.pr_ready {
+                    "  Enabled — PRs will be opened as ready"
+                } else {
+                    "  Disabled — PRs will be opened as draft"
+                },
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]));
+        frame.render_widget(pr_ready_text, chunks[7]);
+
         let path_label = Paragraph::new(Line::from(vec![
             Span::styled("Config file: ", Style::default().fg(Color::DarkGray)),
             Span::styled(
@@ -1225,7 +1266,7 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
                 Style::default().fg(Color::Gray),
             ),
         ]));
-        frame.render_widget(path_label, chunks[6]);
+        frame.render_widget(path_label, chunks[9]);
     }
 
     // Bottom hint bar

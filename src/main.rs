@@ -25,8 +25,8 @@ use crossterm::{
 
 use app::App;
 use config::{
-    get_editor_command, get_verify_command, load_config, save_config, set_editor_command,
-    set_verify_command,
+    get_editor_command, get_pr_ready, get_verify_command, load_config, save_config,
+    set_editor_command, set_verify_command,
 };
 use deps::{check_dependencies, has_missing_required};
 use git::{fetch_worktrees, remove_worktree};
@@ -193,13 +193,14 @@ fn main() -> Result<()> {
                                 app.screen = Screen::Board;
                             }
                             KeyCode::Tab => {
-                                config_edit.active_field =
-                                    if config_edit.active_field == 0 { 1 } else { 0 };
+                                config_edit.active_field = (config_edit.active_field + 1) % 3;
                             }
                             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                                 let verify_cmd = config_edit.verify_command.trim().to_string();
                                 let editor_cmd = config_edit.editor_command.trim().to_string();
                                 let repo = app.repo.clone();
+
+                                let pr_ready = config_edit.pr_ready;
 
                                 if let Some(mut config) = load_config() {
                                     if verify_cmd.is_empty() {
@@ -216,6 +217,11 @@ fn main() -> Result<()> {
                                             .editor_commands
                                             .insert(repo.clone(), editor_cmd.clone());
                                     }
+                                    if pr_ready {
+                                        config.pr_ready.insert(repo.clone(), true);
+                                    } else {
+                                        config.pr_ready.remove(&repo);
+                                    }
                                     let _ = config::save_full_config(&config);
                                 }
 
@@ -223,20 +229,30 @@ fn main() -> Result<()> {
                                 app.config_edit = None;
                                 app.screen = Screen::Board;
                             }
-                            KeyCode::Backspace => {
-                                if config_edit.active_field == 0 {
+                            KeyCode::Backspace => match config_edit.active_field {
+                                0 => {
                                     config_edit.verify_command.pop();
-                                } else {
+                                }
+                                1 => {
                                     config_edit.editor_command.pop();
                                 }
+                                _ => {}
+                            },
+                            KeyCode::Char(' ') if config_edit.active_field == 2 => {
+                                config_edit.pr_ready = !config_edit.pr_ready;
                             }
-                            KeyCode::Char(c) => {
-                                if config_edit.active_field == 0 {
+                            KeyCode::Enter if config_edit.active_field == 2 => {
+                                config_edit.pr_ready = !config_edit.pr_ready;
+                            }
+                            KeyCode::Char(c) => match config_edit.active_field {
+                                0 => {
                                     config_edit.verify_command.push(c);
-                                } else {
+                                }
+                                1 => {
                                     config_edit.editor_command.push(c);
                                 }
-                            }
+                                _ => {}
+                            },
                             _ => {}
                         }
                     }
@@ -403,12 +419,14 @@ fn main() -> Result<()> {
                                                     .clone()
                                                     .unwrap_or_default();
                                                 let repo = app.repo.clone();
+                                                let pr_ready = get_pr_ready(&repo);
                                                 match create_worktree_and_session(
                                                     &repo,
                                                     number,
                                                     &title,
                                                     &body,
                                                     app.hook_script_path.as_deref(),
+                                                    pr_ready,
                                                 ) {
                                                     Ok(()) => {
                                                         app.worktrees = fetch_worktrees();
@@ -555,8 +573,12 @@ fn main() -> Result<()> {
                                         get_verify_command(&app.repo).unwrap_or_default();
                                     let current_editor =
                                         get_editor_command(&app.repo).unwrap_or_default();
-                                    app.config_edit =
-                                        Some(ConfigEditState::new(current_verify, current_editor));
+                                    let current_pr_ready = get_pr_ready(&app.repo);
+                                    app.config_edit = Some(ConfigEditState::new(
+                                        current_verify,
+                                        current_editor,
+                                        current_pr_ready,
+                                    ));
                                     app.screen = Screen::Configuration;
                                 }
                                 // PR actions: 'o' to open in browser, 'r' to mark ready
@@ -973,6 +995,7 @@ fn main() -> Result<()> {
                                             std::thread::spawn(move || {
                                                 match create_issue(&repo, &title, &body) {
                                                     Ok(number) => {
+                                                        let pr_ready = get_pr_ready(&repo);
                                                         let worktree_result =
                                                             create_worktree_and_session(
                                                                 &repo,
@@ -980,6 +1003,7 @@ fn main() -> Result<()> {
                                                                 &title,
                                                                 &body,
                                                                 hook_script.as_deref(),
+                                                                pr_ready,
                                                             );
                                                         let _ =
                                                             tx.send(IssueSubmitResult::Success {

@@ -12,6 +12,8 @@ pub struct Config {
     pub verify_commands: HashMap<String, String>,
     #[serde(default)]
     pub editor_commands: HashMap<String, String>,
+    #[serde(default)]
+    pub pr_ready: HashMap<String, bool>,
 }
 
 pub fn config_path() -> PathBuf {
@@ -28,7 +30,7 @@ pub fn load_config() -> Option<Config> {
 }
 
 pub fn save_config(repo: &str) -> Result<()> {
-    // Load existing config to preserve verify_commands and editor_commands
+    // Load existing config to preserve verify_commands, editor_commands, pr_ready
     let existing = load_config();
     let verify_commands = existing
         .as_ref()
@@ -38,6 +40,10 @@ pub fn save_config(repo: &str) -> Result<()> {
         .as_ref()
         .map(|c| c.editor_commands.clone())
         .unwrap_or_default();
+    let pr_ready = existing
+        .as_ref()
+        .map(|c| c.pr_ready.clone())
+        .unwrap_or_default();
     let path = config_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -46,6 +52,7 @@ pub fn save_config(repo: &str) -> Result<()> {
         repo: repo.to_string(),
         verify_commands,
         editor_commands,
+        pr_ready,
     };
     fs::write(path, serde_json::to_string_pretty(&config)?)?;
     Ok(())
@@ -75,6 +82,7 @@ pub fn set_editor_command(repo: &str, command: &str) -> Result<()> {
         repo: repo.to_string(),
         verify_commands: HashMap::new(),
         editor_commands: HashMap::new(),
+        pr_ready: HashMap::new(),
     });
     config
         .editor_commands
@@ -87,9 +95,16 @@ pub fn set_verify_command(repo: &str, command: &str) -> Result<()> {
         repo: repo.to_string(),
         verify_commands: HashMap::new(),
         editor_commands: HashMap::new(),
+        pr_ready: HashMap::new(),
     });
     config
         .verify_commands
         .insert(repo.to_string(), command.to_string());
     save_full_config(&config)
+}
+
+pub fn get_pr_ready(repo: &str) -> bool {
+    load_config()
+        .and_then(|c| c.pr_ready.get(repo).copied())
+        .unwrap_or(false)
 }
