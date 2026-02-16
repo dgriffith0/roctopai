@@ -25,7 +25,7 @@ use crossterm::{
 
 use app::App;
 use config::{
-    get_claude_command, get_editor_command, get_pr_ready, get_verify_command, load_config,
+    get_editor_command, get_pr_ready, get_session_command, get_verify_command, load_config,
     save_config, set_editor_command, set_verify_command,
 };
 use deps::{check_dependencies, has_missing_required};
@@ -205,7 +205,7 @@ fn main() -> Result<()> {
                                 let editor_cmd =
                                     config_edit.editor_command.value().trim().to_string();
                                 let claude_cmd =
-                                    config_edit.claude_command.value().trim().to_string();
+                                    config_edit.session_command.value().trim().to_string();
                                 let repo = app.repo.clone();
 
                                 let pr_ready = config_edit.pr_ready;
@@ -231,10 +231,10 @@ fn main() -> Result<()> {
                                         config.pr_ready.remove(&repo);
                                     }
                                     if claude_cmd.is_empty() {
-                                        config.claude_commands.remove(&repo);
+                                        config.session_commands.remove(&repo);
                                     } else {
                                         config
-                                            .claude_commands
+                                            .session_commands
                                             .insert(repo.clone(), claude_cmd.clone());
                                     }
                                     let _ = config::save_full_config(&config);
@@ -247,31 +247,31 @@ fn main() -> Result<()> {
                             KeyCode::Backspace => match config_edit.active_field {
                                 0 => config_edit.verify_command.delete_back(),
                                 1 => config_edit.editor_command.delete_back(),
-                                3 => config_edit.claude_command.delete_back(),
+                                3 => config_edit.session_command.delete_back(),
                                 _ => {}
                             },
                             KeyCode::Left => match config_edit.active_field {
                                 0 => config_edit.verify_command.move_left(),
                                 1 => config_edit.editor_command.move_left(),
-                                3 => config_edit.claude_command.move_left(),
+                                3 => config_edit.session_command.move_left(),
                                 _ => {}
                             },
                             KeyCode::Right => match config_edit.active_field {
                                 0 => config_edit.verify_command.move_right(),
                                 1 => config_edit.editor_command.move_right(),
-                                3 => config_edit.claude_command.move_right(),
+                                3 => config_edit.session_command.move_right(),
                                 _ => {}
                             },
                             KeyCode::Home => match config_edit.active_field {
                                 0 => config_edit.verify_command.move_home(),
                                 1 => config_edit.editor_command.move_home(),
-                                3 => config_edit.claude_command.move_home(),
+                                3 => config_edit.session_command.move_home(),
                                 _ => {}
                             },
                             KeyCode::End => match config_edit.active_field {
                                 0 => config_edit.verify_command.move_end(),
                                 1 => config_edit.editor_command.move_end(),
-                                3 => config_edit.claude_command.move_end(),
+                                3 => config_edit.session_command.move_end(),
                                 _ => {}
                             },
                             KeyCode::Char(' ') if config_edit.active_field == 2 => {
@@ -283,7 +283,7 @@ fn main() -> Result<()> {
                             KeyCode::Char(c) => match config_edit.active_field {
                                 0 => config_edit.verify_command.insert(c),
                                 1 => config_edit.editor_command.insert(c),
-                                3 => config_edit.claude_command.insert(c),
+                                3 => config_edit.session_command.insert(c),
                                 _ => {}
                             },
                             _ => {}
@@ -483,7 +483,7 @@ fn main() -> Result<()> {
                                                     .unwrap_or_default();
                                                 let repo = app.repo.clone();
                                                 let pr_ready = get_pr_ready(&repo);
-                                                let claude_cmd = get_claude_command(&repo);
+                                                let claude_cmd = get_session_command(&repo);
                                                 match create_worktree_and_session(
                                                     &repo,
                                                     number,
@@ -620,7 +620,7 @@ fn main() -> Result<()> {
                                         get_editor_command(&app.repo).unwrap_or_default();
                                     let current_pr_ready = get_pr_ready(&app.repo);
                                     let current_claude =
-                                        get_claude_command(&app.repo).unwrap_or_default();
+                                        get_session_command(&app.repo).unwrap_or_default();
                                     app.config_edit = Some(ConfigEditState::new(
                                         current_verify,
                                         current_editor,
@@ -1051,7 +1051,7 @@ fn main() -> Result<()> {
                                             let body = modal.body.value().to_string();
                                             let repo = app.repo.clone();
                                             let hook_script = app.hook_script_path.clone();
-                                            let claude_cmd = get_claude_command(&repo);
+                                            let claude_cmd = get_session_command(&repo);
                                             let (tx, rx) = mpsc::channel();
                                             app.issue_submit_rx = Some(rx);
                                             std::thread::spawn(move || {
