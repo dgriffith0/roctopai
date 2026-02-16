@@ -10,7 +10,7 @@ use crate::models::{
     AssigneeFilter, Card, ConfigEditState, ConfirmModal, IssueModal, IssueSubmitResult, MessageLog,
     Mode, RepoSelectState, Screen, SessionStates, StateFilter, MAX_MESSAGES,
 };
-use crate::session::fetch_sessions;
+use crate::session::{fetch_sessions, Multiplexer};
 
 pub struct App {
     pub screen: Screen,
@@ -41,10 +41,15 @@ pub struct App {
     pub messages_expanded: bool,
     pub pending_refresh: Option<Instant>,
     pub main_behind_count: usize,
+    pub multiplexer: Multiplexer,
 }
 
 impl App {
-    pub fn new(session_states: SessionStates, message_log: MessageLog) -> Self {
+    pub fn new(
+        session_states: SessionStates,
+        message_log: MessageLog,
+        multiplexer: Multiplexer,
+    ) -> Self {
         let hook_script_path = ensure_hook_script()
             .ok()
             .map(|p| p.to_string_lossy().to_string());
@@ -77,6 +82,7 @@ impl App {
             messages_expanded: false,
             pending_refresh: None,
             main_behind_count: 0,
+            multiplexer,
         }
     }
 
@@ -182,14 +188,14 @@ impl App {
         self.worktrees = fetch_worktrees();
 
         // Clean up worktrees and sessions for merged PRs
-        let cleaned = cleanup_merged_worktrees(&self.repo, &self.worktrees);
+        let cleaned = cleanup_merged_worktrees(&self.repo, &self.worktrees, self.multiplexer);
         if !cleaned.is_empty() {
             self.set_status(format!("Cleaned up merged: {}", cleaned.join(", ")));
             // Re-fetch worktrees after cleanup
             self.worktrees = fetch_worktrees();
         }
 
-        self.sessions = fetch_sessions(&self.session_states);
+        self.sessions = fetch_sessions(&self.session_states, self.multiplexer);
         self.main_behind_count = fetch_main_behind_count();
         self.clamp_selected();
         self.last_refresh = Instant::now();

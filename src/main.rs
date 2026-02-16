@@ -25,8 +25,8 @@ use crossterm::{
 
 use app::App;
 use config::{
-    get_editor_command, get_pr_ready, get_session_command, get_verify_command, load_config,
-    save_config, set_editor_command, set_verify_command,
+    get_editor_command, get_multiplexer, get_pr_ready, get_session_command, get_verify_command,
+    load_config, save_config, set_editor_command, set_verify_command,
 };
 use deps::{check_dependencies, has_missing_required};
 use git::{detect_current_repo, fetch_worktrees, remove_worktree};
@@ -37,9 +37,7 @@ use models::{
     MessageLog, Mode, RepoSelectPhase, Screen, SessionStates, StateFilter, TextInput,
     REFRESH_INTERVAL, SOCKET_PATH,
 };
-use session::{
-    attach_tmux_session, create_worktree_and_session, expand_editor_command, fetch_sessions,
-};
+use session::{create_worktree_and_session, expand_editor_command, fetch_sessions, Multiplexer};
 use ui::{ui, ui_configuration, ui_dependencies, ui_repo_select};
 
 fn main() -> Result<()> {
@@ -55,7 +53,10 @@ fn main() -> Result<()> {
 
     let mut terminal =
         ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(io::stdout()))?;
-    let mut app = App::new(session_states, message_log);
+    let multiplexer = get_multiplexer()
+        .or_else(Multiplexer::detect)
+        .unwrap_or(Multiplexer::Tmux);
+    let mut app = App::new(session_states, message_log, multiplexer);
 
     // Check external dependencies on startup
     let initial_deps = check_dependencies();
@@ -127,7 +128,7 @@ fn main() -> Result<()> {
                         match worktree_result {
                             Ok(()) => {
                                 app.worktrees = fetch_worktrees();
-                                app.sessions = fetch_sessions(&app.session_states);
+                                app.sessions = fetch_sessions(&app.session_states, app.multiplexer);
                                 app.clamp_selected();
                                 app.set_status(format!(
                                     "Created issue #{} with worktree and session",
@@ -211,7 +212,7 @@ fn main() -> Result<()> {
                                 app.screen = Screen::Board;
                             }
                             KeyCode::Tab => {
-                                config_edit.active_field = (config_edit.active_field + 1) % 4;
+                                config_edit.active_field = (config_edit.active_field + 1) % 5;
                             }
                             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                                 let verify_cmd =
@@ -251,9 +252,11 @@ fn main() -> Result<()> {
                                             .session_commands
                                             .insert(repo.clone(), claude_cmd.clone());
                                     }
+                                    config.multiplexer = Some(config_edit.multiplexer);
                                     let _ = config::save_full_config(&config);
                                 }
 
+                                app.multiplexer = config_edit.multiplexer;
                                 app.set_status("Configuration saved".to_string());
                                 app.config_edit = None;
                                 app.screen = Screen::Board;
@@ -288,11 +291,18 @@ fn main() -> Result<()> {
                                 3 => config_edit.session_command.move_end(),
                                 _ => {}
                             },
-                            KeyCode::Char(' ') if config_edit.active_field == 2 => {
+                            KeyCode::Char(' ') | KeyCode::Enter
+                                if config_edit.active_field == 2 =>
+                            {
                                 config_edit.pr_ready = !config_edit.pr_ready;
                             }
-                            KeyCode::Enter if config_edit.active_field == 2 => {
-                                config_edit.pr_ready = !config_edit.pr_ready;
+                            KeyCode::Char(' ') | KeyCode::Enter
+                                if config_edit.active_field == 4 =>
+                            {
+                                config_edit.multiplexer = match config_edit.multiplexer {
+                                    Multiplexer::Tmux => Multiplexer::Screen,
+                                    Multiplexer::Screen => Multiplexer::Tmux,
+                                };
                             }
                             KeyCode::Char(c) => match config_edit.active_field {
                                 0 => config_edit.verify_command.insert(c),
@@ -504,11 +514,14 @@ fn main() -> Result<()> {
                                                     app.hook_script_path.as_deref(),
                                                     pr_ready,
                                                     claude_cmd.as_deref(),
+                                                    app.multiplexer,
                                                 ) {
                                                     Ok(()) => {
                                                         app.worktrees = fetch_worktrees();
-                                                        app.sessions =
-                                                            fetch_sessions(&app.session_states);
+                                                        app.sessions = fetch_sessions(
+                                                            &app.session_states,
+                                                            app.multiplexer,
+                                                        );
                                                         app.clamp_selected();
                                                         app.last_refresh =
                                                             std::time::Instant::now();
@@ -557,7 +570,7 @@ fn main() -> Result<()> {
                                             let path = card.description.clone();
                                             app.confirm_modal = Some(ConfirmModal {
                                                 message: format!(
-                                                    "Remove worktree '{}'?\n\nPath: {}\nThis will also delete the branch and kill any tmux session.",
+                                                    "Remove worktree '{}'?\n\nPath: {}\nThis will also delete the branch and kill any associated session.",
                                                     branch, path
                                                 ),
                                                 on_confirm: ConfirmAction::RemoveWorktree {
@@ -641,6 +654,7 @@ fn main() -> Result<()> {
                                         current_editor,
                                         current_pr_ready,
                                         current_claude,
+                                        app.multiplexer,
                                     ));
                                     app.screen = Screen::Configuration;
                                 }
@@ -752,10 +766,7 @@ fn main() -> Result<()> {
                                     if let Some(card) = app.sessions.get(app.selected_card[2]) {
                                         let session_name = card.title.clone();
                                         app.confirm_modal = Some(ConfirmModal {
-                                            message: format!(
-                                                "Kill tmux session '{}'?",
-                                                session_name
-                                            ),
+                                            message: format!("Kill session '{}'?", session_name),
                                             on_confirm: ConfirmAction::KillSession {
                                                 name: session_name,
                                             },
@@ -766,10 +777,10 @@ fn main() -> Result<()> {
                                 KeyCode::Char('a') if app.active_section == 2 => {
                                     if let Some(card) = app.sessions.get(app.selected_card[2]) {
                                         let session_name = card.title.clone();
-                                        // Suspend TUI, attach to tmux, resume on detach
+                                        // Suspend TUI, attach to session, resume on detach
                                         disable_raw_mode()?;
                                         io::stdout().execute(LeaveAlternateScreen)?;
-                                        let _ = attach_tmux_session(&session_name);
+                                        let _ = app.multiplexer.attach(&session_name);
                                         enable_raw_mode()?;
                                         io::stdout().execute(EnterAlternateScreen)?;
                                         terminal.clear()?;
@@ -865,11 +876,13 @@ fn main() -> Result<()> {
                                             }
                                         }
                                         ConfirmAction::RemoveWorktree { path, branch } => {
-                                            match remove_worktree(&path, &branch) {
+                                            match remove_worktree(&path, &branch, app.multiplexer) {
                                                 Ok(()) => {
                                                     app.worktrees = fetch_worktrees();
-                                                    app.sessions =
-                                                        fetch_sessions(&app.session_states);
+                                                    app.sessions = fetch_sessions(
+                                                        &app.session_states,
+                                                        app.multiplexer,
+                                                    );
                                                     app.clamp_selected();
                                                     app.last_refresh = std::time::Instant::now();
                                                     app.set_status(format!(
@@ -883,31 +896,14 @@ fn main() -> Result<()> {
                                             }
                                         }
                                         ConfirmAction::KillSession { name } => {
-                                            let output = Command::new("tmux")
-                                                .args(["kill-session", "-t", &name])
-                                                .output();
-                                            match output {
-                                                Ok(o) if o.status.success() => {
-                                                    app.sessions =
-                                                        fetch_sessions(&app.session_states);
-                                                    app.clamp_selected();
-                                                    app.last_refresh = std::time::Instant::now();
-                                                    app.set_status(format!(
-                                                        "Killed session '{}'",
-                                                        name
-                                                    ));
-                                                }
-                                                Ok(o) => {
-                                                    let stderr = String::from_utf8_lossy(&o.stderr);
-                                                    app.set_status(format!(
-                                                        "Error: {}",
-                                                        stderr.trim()
-                                                    ));
-                                                }
-                                                Err(e) => {
-                                                    app.set_status(format!("Error: {}", e));
-                                                }
-                                            }
+                                            app.multiplexer.kill_session(&name);
+                                            app.sessions = fetch_sessions(
+                                                &app.session_states,
+                                                app.multiplexer,
+                                            );
+                                            app.clamp_selected();
+                                            app.last_refresh = std::time::Instant::now();
+                                            app.set_status(format!("Killed session '{}'", name));
                                         }
                                         ConfirmAction::RevertPr { number } => {
                                             let repo = app.repo.clone();
@@ -1014,8 +1010,12 @@ fn main() -> Result<()> {
                                                         {
                                                             let wt_path = wt.description.clone();
                                                             let wt_branch = wt.title.clone();
-                                                            if remove_worktree(&wt_path, &wt_branch)
-                                                                .is_ok()
+                                                            if remove_worktree(
+                                                                &wt_path,
+                                                                &wt_branch,
+                                                                app.multiplexer,
+                                                            )
+                                                            .is_ok()
                                                             {
                                                                 app.set_status(format!(
                                                                     "Merged PR #{} ({}) — cleaned up worktree '{}'",
@@ -1032,8 +1032,10 @@ fn main() -> Result<()> {
                                                         app.pr_assignee_filter,
                                                     );
                                                     app.worktrees = fetch_worktrees();
-                                                    app.sessions =
-                                                        fetch_sessions(&app.session_states);
+                                                    app.sessions = fetch_sessions(
+                                                        &app.session_states,
+                                                        app.multiplexer,
+                                                    );
                                                     app.clamp_selected();
                                                     app.last_refresh = std::time::Instant::now();
                                                     // Schedule a delayed refresh so GitHub
@@ -1110,6 +1112,7 @@ fn main() -> Result<()> {
                                             let repo = app.repo.clone();
                                             let hook_script = app.hook_script_path.clone();
                                             let claude_cmd = get_session_command(&repo);
+                                            let mux = app.multiplexer;
                                             let (tx, rx) = mpsc::channel();
                                             app.issue_submit_rx = Some(rx);
                                             std::thread::spawn(move || {
@@ -1125,6 +1128,7 @@ fn main() -> Result<()> {
                                                                 hook_script.as_deref(),
                                                                 pr_ready,
                                                                 claude_cmd.as_deref(),
+                                                                mux,
                                                             );
                                                         let _ =
                                                             tx.send(IssueSubmitResult::Success {

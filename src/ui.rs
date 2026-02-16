@@ -1249,6 +1249,9 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
                 Constraint::Length(1), // session command label
                 Constraint::Length(3), // session command input
                 Constraint::Length(1), // spacing
+                Constraint::Length(1), // multiplexer label
+                Constraint::Length(1), // multiplexer toggle
+                Constraint::Length(1), // spacing
                 Constraint::Length(1), // template fields header
                 Constraint::Min(0),    // template fields list + config path
             ])
@@ -1258,6 +1261,7 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
         let editor_active = config_edit.active_field == 1;
         let pr_ready_active = config_edit.active_field == 2;
         let session_active = config_edit.active_field == 3;
+        let mux_active = config_edit.active_field == 4;
 
         // Verify command field
         let verify_label = Paragraph::new(Line::from(vec![Span::styled(
@@ -1419,6 +1423,40 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
         let session_text = Paragraph::new(Line::from(session_spans)).block(session_block);
         frame.render_widget(session_text, chunks[10]);
 
+        // Multiplexer toggle field
+        let mux_label = Paragraph::new(Line::from(vec![Span::styled(
+            "Terminal Multiplexer",
+            Style::default()
+                .fg(if mux_active { Color::Cyan } else { Color::Gray })
+                .add_modifier(Modifier::BOLD),
+        )]));
+        frame.render_widget(mux_label, chunks[12]);
+
+        let mux_toggle_color = if mux_active {
+            Color::White
+        } else {
+            Color::DarkGray
+        };
+        let mux_text = Paragraph::new(Line::from(vec![
+            Span::styled(
+                format!("[{}]", config_edit.multiplexer.label()),
+                Style::default()
+                    .fg(mux_toggle_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(
+                    "  {} — press Space to toggle",
+                    match config_edit.multiplexer {
+                        crate::session::Multiplexer::Tmux => "tmux (default)",
+                        crate::session::Multiplexer::Screen => "GNU Screen",
+                    }
+                ),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]));
+        frame.render_widget(mux_text, chunks[13]);
+
         // Template fields header
         let fields_header = Paragraph::new(Line::from(vec![Span::styled(
             "Available template fields:",
@@ -1426,7 +1464,7 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
                 .fg(Color::Gray)
                 .add_modifier(Modifier::BOLD),
         )]));
-        frame.render_widget(fields_header, chunks[12]);
+        frame.render_widget(fields_header, chunks[15]);
 
         // Template fields list + config path in the remaining space
         let mut lines: Vec<Line> = Vec::new();
@@ -1497,7 +1535,7 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
             ),
         ]));
         let fields_list = Paragraph::new(lines);
-        frame.render_widget(fields_list, chunks[13]);
+        frame.render_widget(fields_list, chunks[16]);
     }
 
     // Bottom hint bar

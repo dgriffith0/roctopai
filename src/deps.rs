@@ -12,8 +12,28 @@ pub fn check_dependencies() -> Vec<Dependency> {
     let mut deps = vec![
         check_dep("gh", "gh", "GitHub CLI for issue/PR management", true),
         check_dep("git", "git", "Version control with worktree support", true),
-        check_dep("tmux", "tmux", "Terminal multiplexer for sessions", true),
     ];
+
+    // Require at least one terminal multiplexer (tmux or screen)
+    let tmux = check_dep("tmux", "tmux", "Terminal multiplexer for sessions", false);
+    let screen = check_dep(
+        "screen",
+        "screen",
+        "Terminal multiplexer for sessions",
+        false,
+    );
+    let mux_available = tmux.available || screen.available;
+    deps.push(Dependency {
+        name: "tmux/screen",
+        description: "Terminal multiplexer for sessions (tmux or GNU Screen)",
+        required: true,
+        available: mux_available,
+        version: if tmux.available {
+            tmux.version
+        } else {
+            screen.version
+        },
+    });
 
     // Require at least one AI coding assistant (claude or cursor)
     let claude = check_dep(
@@ -51,8 +71,12 @@ fn check_dep(
     description: &'static str,
     required: bool,
 ) -> Dependency {
-    // tmux uses -V instead of --version
-    let version_flag = if command == "tmux" { "-V" } else { "--version" };
+    // tmux and screen use -V instead of --version
+    let version_flag = if command == "tmux" || command == "screen" {
+        "-V"
+    } else {
+        "--version"
+    };
 
     let (available, version) = match Command::new(command).arg(version_flag).output() {
         Ok(output) => {

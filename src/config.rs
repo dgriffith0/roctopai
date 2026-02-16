@@ -5,6 +5,8 @@ use std::path::PathBuf;
 use color_eyre::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::session::Multiplexer;
+
 #[derive(Serialize, Deserialize)]
 pub struct Config {
     pub repo: String,
@@ -16,6 +18,8 @@ pub struct Config {
     pub pr_ready: HashMap<String, bool>,
     #[serde(default, alias = "claude_commands")]
     pub session_commands: HashMap<String, String>,
+    #[serde(default)]
+    pub multiplexer: Option<Multiplexer>,
 }
 
 pub fn config_path() -> PathBuf {
@@ -54,12 +58,14 @@ pub fn save_config(repo: &str) -> Result<()> {
         .as_ref()
         .map(|c| c.session_commands.clone())
         .unwrap_or_default();
+    let multiplexer = existing.and_then(|c| c.multiplexer);
     let config = Config {
         repo: repo.to_string(),
         verify_commands,
         editor_commands,
         pr_ready,
         session_commands,
+        multiplexer,
     };
     fs::write(path, serde_json::to_string_pretty(&config)?)?;
     Ok(())
@@ -96,6 +102,7 @@ pub fn set_editor_command(repo: &str, command: &str) -> Result<()> {
         editor_commands: HashMap::new(),
         pr_ready: HashMap::new(),
         session_commands: HashMap::new(),
+        multiplexer: None,
     });
     config
         .editor_commands
@@ -110,6 +117,7 @@ pub fn set_verify_command(repo: &str, command: &str) -> Result<()> {
         editor_commands: HashMap::new(),
         pr_ready: HashMap::new(),
         session_commands: HashMap::new(),
+        multiplexer: None,
     });
     config
         .verify_commands
@@ -126,4 +134,8 @@ pub fn get_pr_ready(repo: &str) -> bool {
 pub fn get_session_command(repo: &str) -> Option<String> {
     let config = load_config()?;
     config.session_commands.get(repo).cloned()
+}
+
+pub fn get_multiplexer() -> Option<Multiplexer> {
+    load_config()?.multiplexer
 }
