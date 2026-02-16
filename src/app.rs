@@ -39,6 +39,7 @@ pub struct App {
     pub message_log: MessageLog,
     pub show_messages: bool,
     pub messages_expanded: bool,
+    pub pending_refresh: Option<Instant>,
 }
 
 impl App {
@@ -73,6 +74,7 @@ impl App {
             message_log: message_log.clone(),
             show_messages: true,
             messages_expanded: false,
+            pending_refresh: None,
         }
     }
 

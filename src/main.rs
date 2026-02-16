@@ -91,6 +91,17 @@ fn main() -> Result<()> {
             app.refresh_data();
         }
 
+        // Delayed refresh after PR merge (gives GitHub API time to propagate)
+        if app.screen == Screen::Board
+            && app.mode == Mode::Normal
+            && app
+                .pending_refresh
+                .is_some_and(|t| t <= std::time::Instant::now())
+        {
+            app.pending_refresh = None;
+            app.refresh_data();
+        }
+
         // Check for issue submission results from background thread
         if let Some(rx) = &app.issue_submit_rx {
             if let Ok(result) = rx.try_recv() {
@@ -1022,6 +1033,13 @@ fn main() -> Result<()> {
                                                         fetch_sessions(&app.session_states);
                                                     app.clamp_selected();
                                                     app.last_refresh = std::time::Instant::now();
+                                                    // Schedule a delayed refresh so GitHub
+                                                    // API changes (e.g. linked issues closing)
+                                                    // are picked up.
+                                                    app.pending_refresh = Some(
+                                                        std::time::Instant::now()
+                                                            + std::time::Duration::from_secs(3),
+                                                    );
                                                     if branch.is_none()
                                                         || app.worktrees.iter().any(|w| {
                                                             branch.as_deref() == Some(&w.title)
