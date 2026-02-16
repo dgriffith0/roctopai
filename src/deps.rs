@@ -41,7 +41,10 @@ fn check_dep(
     description: &'static str,
     required: bool,
 ) -> Dependency {
-    let (available, version) = match Command::new(command).arg("--version").output() {
+    // tmux uses -V instead of --version
+    let version_flag = if command == "tmux" { "-V" } else { "--version" };
+
+    let (available, version) = match Command::new(command).arg(version_flag).output() {
         Ok(output) => {
             let version_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
             let version_str = if version_str.is_empty() {
