@@ -2,36 +2,97 @@ use std::fs;
 use std::process::Command;
 
 use ratatui::style::Color;
+use serde::{Deserialize, Serialize};
 
 use crate::git::{get_repo_name, trust_directory};
 use crate::hooks::write_worktree_hook_config;
 use crate::models::{Card, SessionStates};
 
-pub fn fetch_sessions(socket_states: &SessionStates) -> Vec<Card> {
-    let output = Command::new("tmux")
-        .args(["list-sessions", "-F", "#{session_name}"])
-        .output();
+/// Terminal multiplexer backend used for managing sessions.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Multiplexer {
+    Tmux,
+    Screen,
+}
 
-    let output = match output {
-        Ok(o) if o.status.success() => o,
-        _ => return Vec::new(),
-    };
+impl Multiplexer {
+    /// Detect the best available multiplexer. Prefers tmux, falls back to GNU Screen.
+    pub fn detect() -> Option<Self> {
+        if Self::is_available("tmux") {
+            Some(Multiplexer::Tmux)
+        } else if Self::is_available("screen") {
+            Some(Multiplexer::Screen)
+        } else {
+            None
+        }
+    }
 
-    let states = socket_states.lock().unwrap_or_else(|e| e.into_inner());
+    fn is_available(cmd: &str) -> bool {
+        Command::new("which")
+            .arg(cmd)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    stdout
-        .lines()
-        .filter(|name| !name.is_empty())
-        .filter(|name| name.starts_with("issue-"))
-        .map(|name| {
-            // Use socket-derived state if available, otherwise fall back
-            // to pane content detection.
-            let claude_state = if let Some(status) = states.get(name) {
-                status.as_str()
-            } else {
-                let pane_target = format!("{}:.0", name);
-                let pane_content = Command::new("tmux")
+    pub fn label(self) -> &'static str {
+        match self {
+            Multiplexer::Tmux => "tmux",
+            Multiplexer::Screen => "screen",
+        }
+    }
+
+    /// List session names matching the `issue-` prefix.
+    pub fn list_sessions(self) -> Vec<String> {
+        match self {
+            Multiplexer::Tmux => {
+                let output = Command::new("tmux")
+                    .args(["list-sessions", "-F", "#{session_name}"])
+                    .output();
+                match output {
+                    Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
+                        .lines()
+                        .filter(|n| !n.is_empty() && n.starts_with("issue-"))
+                        .map(|n| n.to_string())
+                        .collect(),
+                    _ => Vec::new(),
+                }
+            }
+            Multiplexer::Screen => {
+                let output = Command::new("screen").args(["-ls"]).output();
+                match output {
+                    Ok(o) => {
+                        // screen -ls output format: "\tPID.name\t(status)"
+                        let stdout = String::from_utf8_lossy(&o.stdout);
+                        stdout
+                            .lines()
+                            .filter_map(|line| {
+                                let trimmed = line.trim();
+                                // Lines like "12345.issue-42\t(Detached)"
+                                let name_part = trimmed.split('\t').next()?;
+                                // Strip the PID prefix: "12345.issue-42" -> "issue-42"
+                                let session_name = name_part.split_once('.')?.1;
+                                if session_name.starts_with("issue-") {
+                                    Some(session_name.to_string())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect()
+                    }
+                    _ => Vec::new(),
+                }
+            }
+        }
+    }
+
+    /// Capture pane content for state detection.
+    pub fn capture_pane(self, session: &str) -> Option<String> {
+        match self {
+            Multiplexer::Tmux => {
+                let pane_target = format!("{}:.0", session);
+                Command::new("tmux")
                     .args(["capture-pane", "-t", &pane_target, "-p"])
                     .output()
                     .ok()
@@ -41,7 +102,116 @@ pub fn fetch_sessions(socket_states: &SessionStates) -> Vec<Card> {
                         } else {
                             None
                         }
-                    });
+                    })
+            }
+            Multiplexer::Screen => {
+                let hardcopy_path = format!("/tmp/octopai-hardcopy-{}.txt", session);
+                let _ = Command::new("screen")
+                    .args(["-S", session, "-X", "hardcopy", &hardcopy_path])
+                    .output();
+                // Small delay for file write
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let content = fs::read_to_string(&hardcopy_path).ok();
+                let _ = fs::remove_file(&hardcopy_path);
+                content
+            }
+        }
+    }
+
+    /// Create a new detached session with the given name and working directory.
+    pub fn create_session(self, name: &str, working_dir: &str) -> std::result::Result<(), String> {
+        let output = match self {
+            Multiplexer::Tmux => Command::new("tmux")
+                .args(["new-session", "-d", "-s", name, "-c", working_dir])
+                .output()
+                .map_err(|e| format!("Failed to create tmux session: {}", e))?,
+            Multiplexer::Screen => Command::new("screen")
+                .args(["-dmS", name])
+                .current_dir(working_dir)
+                .output()
+                .map_err(|e| format!("Failed to create screen session: {}", e))?,
+        };
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("{} error: {}", self.label(), stderr.trim()));
+        }
+        Ok(())
+    }
+
+    /// Send a command string to a session's pane.
+    pub fn send_keys(self, session: &str, cmd: &str) {
+        match self {
+            Multiplexer::Tmux => {
+                let pane_target = format!("{}:.0", session);
+                let _ = Command::new("tmux")
+                    .args(["send-keys", "-t", &pane_target, "-l", cmd])
+                    .output();
+                let _ = Command::new("tmux")
+                    .args(["send-keys", "-t", &pane_target, "Enter"])
+                    .output();
+            }
+            Multiplexer::Screen => {
+                let stuffed = format!("{}\n", cmd);
+                let _ = Command::new("screen")
+                    .args(["-S", session, "-X", "stuff", &stuffed])
+                    .output();
+            }
+        }
+    }
+
+    /// Attach to an existing session interactively.
+    pub fn attach(self, session: &str) -> std::result::Result<(), String> {
+        let status = match self {
+            Multiplexer::Tmux => Command::new("tmux")
+                .args(["attach-session", "-t", session])
+                .stdin(std::process::Stdio::inherit())
+                .stdout(std::process::Stdio::inherit())
+                .stderr(std::process::Stdio::inherit())
+                .status(),
+            Multiplexer::Screen => Command::new("screen")
+                .args(["-r", session])
+                .stdin(std::process::Stdio::inherit())
+                .stdout(std::process::Stdio::inherit())
+                .stderr(std::process::Stdio::inherit())
+                .status(),
+        };
+        status.map_err(|e| format!("Failed to attach: {}", e))?;
+        Ok(())
+    }
+
+    /// Kill a session by name.
+    pub fn kill_session(self, session: &str) -> std::process::Output {
+        match self {
+            Multiplexer::Tmux => Command::new("tmux")
+                .args(["kill-session", "-t", session])
+                .output()
+                .expect("failed to run multiplexer"),
+            Multiplexer::Screen => Command::new("screen")
+                .args(["-S", session, "-X", "quit"])
+                .output()
+                .expect("failed to run multiplexer"),
+        }
+    }
+}
+
+pub fn fetch_sessions(socket_states: &SessionStates, mux: Multiplexer) -> Vec<Card> {
+    let session_names = mux.list_sessions();
+    if session_names.is_empty() {
+        return Vec::new();
+    }
+
+    let states = socket_states.lock().unwrap_or_else(|e| e.into_inner());
+
+    session_names
+        .iter()
+        .map(|name| {
+            // Use socket-derived state if available, otherwise fall back
+            // to pane content detection.
+            let claude_state = if let Some(status) = states.get(name.as_str()) {
+                status.as_str()
+            } else {
+                let pane_content = mux.capture_pane(name);
 
                 if let Some(content) = pane_content {
                     let trimmed = content.trim_end();
@@ -77,7 +247,7 @@ pub fn fetch_sessions(socket_states: &SessionStates) -> Vec<Card> {
             };
 
             // Link to the related issue card
-            let related = vec![format!("{}", name)];
+            let related = vec![name.to_string()];
 
             Card {
                 id: format!("session-{}", name),
@@ -95,17 +265,6 @@ pub fn fetch_sessions(socket_states: &SessionStates) -> Vec<Card> {
             }
         })
         .collect()
-}
-
-pub fn attach_tmux_session(session: &str) -> std::result::Result<(), String> {
-    Command::new("tmux")
-        .args(["attach-session", "-t", session])
-        .stdin(std::process::Stdio::inherit())
-        .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit())
-        .status()
-        .map_err(|e| format!("Failed to attach: {}", e))?;
-    Ok(())
 }
 
 /// Default command template for Claude Code sessions.
@@ -271,6 +430,7 @@ fn expand_template(
         .replace("{worktree_path}", worktree_path)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn create_worktree_and_session(
     repo: &str,
     number: u64,
@@ -279,6 +439,7 @@ pub fn create_worktree_and_session(
     hook_script: Option<&str>,
     pr_ready: bool,
     session_command: Option<&str>,
+    mux: Multiplexer,
 ) -> std::result::Result<(), String> {
     let repo_name = get_repo_name(repo);
     let branch = format!("issue-{}", number);
@@ -316,16 +477,8 @@ pub fn create_worktree_and_session(
         ])
         .output();
 
-    // Create tmux session with a shell in the worktree directory
-    let output = Command::new("tmux")
-        .args(["new-session", "-d", "-s", &branch, "-c", &worktree_path])
-        .output()
-        .map_err(|e| format!("Failed to create tmux session: {}", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("tmux error: {}", stderr.trim()));
-    }
+    // Create session with the detected multiplexer
+    mux.create_session(&branch, &worktree_path)?;
 
     // Build the Claude prompt and write to a temp file
     let body_clean = if body.is_empty() {
@@ -369,13 +522,7 @@ pub fn create_worktree_and_session(
     // Wait for shell to initialize, then send the command
     std::thread::sleep(std::time::Duration::from_millis(500));
 
-    let pane_target = format!("{}:.0", branch);
-    let _ = Command::new("tmux")
-        .args(["send-keys", "-t", &pane_target, "-l", &shell_cmd])
-        .output();
-    let _ = Command::new("tmux")
-        .args(["send-keys", "-t", &pane_target, "Enter"])
-        .output();
+    mux.send_keys(&branch, &shell_cmd);
 
     Ok(())
 }

@@ -6,6 +6,7 @@ use ratatui::style::Color;
 
 use crate::github::fetch_merged_pr_branches;
 use crate::models::Card;
+use crate::session::Multiplexer;
 
 pub fn get_repo_name(repo: &str) -> &str {
     repo.split('/').last().unwrap_or(repo)
@@ -110,11 +111,13 @@ pub fn fetch_worktrees() -> Vec<Card> {
     cards
 }
 
-pub fn remove_worktree(path: &str, branch: &str) -> std::result::Result<(), String> {
-    // Kill tmux session if it exists (named after branch)
-    let _ = Command::new("tmux")
-        .args(["kill-session", "-t", branch])
-        .output();
+pub fn remove_worktree(
+    path: &str,
+    branch: &str,
+    mux: Multiplexer,
+) -> std::result::Result<(), String> {
+    // Kill session if it exists (named after branch)
+    let _ = mux.kill_session(branch);
 
     let output = Command::new("git")
         .args(["worktree", "remove", "--force", path])
@@ -132,7 +135,7 @@ pub fn remove_worktree(path: &str, branch: &str) -> std::result::Result<(), Stri
     Ok(())
 }
 
-pub fn cleanup_merged_worktrees(repo: &str, worktrees: &[Card]) -> Vec<String> {
+pub fn cleanup_merged_worktrees(repo: &str, worktrees: &[Card], mux: Multiplexer) -> Vec<String> {
     let merged_branches = fetch_merged_pr_branches(repo);
     if merged_branches.is_empty() {
         return Vec::new();
@@ -144,7 +147,7 @@ pub fn cleanup_merged_worktrees(repo: &str, worktrees: &[Card]) -> Vec<String> {
     for wt in worktrees {
         // worktree title is the branch name, description is the path
         if merged_set.contains(wt.title.as_str())
-            && remove_worktree(&wt.description, &wt.title).is_ok()
+            && remove_worktree(&wt.description, &wt.title, mux).is_ok()
         {
             cleaned.push(wt.title.clone());
         }
