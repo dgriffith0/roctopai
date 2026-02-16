@@ -117,6 +117,7 @@ pub enum Mode {
     CreatingIssue,
     Confirming,
     EditingVerifyCommand { input: String },
+    EditingEditorCommand { input: String },
 }
 
 #[derive(PartialEq)]
@@ -129,11 +130,17 @@ pub enum Screen {
 
 pub struct ConfigEditState {
     pub verify_command: String,
+    pub editor_command: String,
+    pub active_field: usize, // 0 = verify, 1 = editor
 }
 
 impl ConfigEditState {
-    pub fn new(verify_command: String) -> Self {
-        Self { verify_command }
+    pub fn new(verify_command: String, editor_command: String) -> Self {
+        Self {
+            verify_command,
+            editor_command,
+            active_field: 0,
+        }
     }
 }
 

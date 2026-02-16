@@ -499,7 +499,7 @@ pub fn ui(frame: &mut Frame, app: &App) {
             Span::styled(" n/Esc ", key_style),
             Span::styled(" Cancel ", desc_style),
         ],
-        Mode::EditingVerifyCommand { .. } => vec![
+        Mode::EditingVerifyCommand { .. } | Mode::EditingEditorCommand { .. } => vec![
             Span::styled(" Enter ", key_accent),
             Span::styled(" Save & run ", desc_style),
             Span::styled(" Esc ", key_style),
@@ -535,6 +535,8 @@ pub fn ui(frame: &mut Frame, app: &App) {
                 area_spans.push(Span::styled(" Assigned to me ", desc_style));
             }
             1 => {
+                area_spans.push(Span::styled(" e ", key_accent));
+                area_spans.push(Span::styled(" Editor ", desc_style));
                 area_spans.push(Span::styled(" v ", key_accent));
                 area_spans.push(Span::styled(" Verify ", desc_style));
                 area_spans.push(Span::styled(" d ", key_style));
@@ -613,6 +615,11 @@ pub fn ui(frame: &mut Frame, app: &App) {
     // Render verify command prompt overlay if in EditingVerifyCommand mode
     if let Mode::EditingVerifyCommand { input } = &app.mode {
         ui_verify_prompt(frame, input);
+    }
+
+    // Render editor command prompt overlay if in EditingEditorCommand mode
+    if let Mode::EditingEditorCommand { input } = &app.mode {
+        ui_editor_prompt(frame, input);
     }
 }
 
@@ -1030,6 +1037,63 @@ fn ui_verify_prompt(frame: &mut Frame, input: &str) {
     frame.render_widget(hint, chunks[2]);
 }
 
+fn ui_editor_prompt(frame: &mut Frame, input: &str) {
+    let area = centered_rect(50, 20, frame.area());
+
+    frame.render_widget(Clear, area);
+
+    let outer_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Green))
+        .title(" Set Editor Command ")
+        .title_style(
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        )
+        .padding(Padding::new(1, 1, 1, 0));
+    let inner = outer_block.inner(area);
+    frame.render_widget(outer_block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // label
+            Constraint::Length(3), // input
+            Constraint::Min(1),    // hint
+        ])
+        .split(inner);
+
+    let label = Paragraph::new(Line::from(vec![Span::styled(
+        "No editor configured for this repo. Enter a command:",
+        Style::default().fg(Color::White),
+    )]));
+    frame.render_widget(label, chunks[0]);
+
+    let input_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::White))
+        .title(" Command ");
+    let input_text = Paragraph::new(Line::from(vec![
+        Span::styled(
+            input,
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("_", Style::default().fg(Color::Cyan)),
+    ]))
+    .block(input_block);
+    frame.render_widget(input_text, chunks[1]);
+
+    let hint = Paragraph::new(Line::from(vec![Span::styled(
+        "e.g. nvim, code, vim, hx  |  Enter: save & open  Esc: cancel",
+        Style::default().fg(Color::DarkGray),
+    )]));
+    frame.render_widget(hint, chunks[2]);
+}
+
 pub fn ui_configuration(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
@@ -1068,41 +1132,91 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(1), // label
-                Constraint::Length(3), // input
-                Constraint::Length(2), // spacing
+                Constraint::Length(1), // verify label
+                Constraint::Length(3), // verify input
+                Constraint::Length(1), // spacing
+                Constraint::Length(1), // editor label
+                Constraint::Length(3), // editor input
+                Constraint::Length(1), // spacing
                 Constraint::Length(1), // config file path
                 Constraint::Min(0),
             ])
             .split(inner);
 
-        let label = Paragraph::new(Line::from(vec![Span::styled(
+        let verify_active = config_edit.active_field == 0;
+        let editor_active = config_edit.active_field == 1;
+
+        // Verify command field
+        let verify_label = Paragraph::new(Line::from(vec![Span::styled(
             "Verify Command",
             Style::default()
-                .fg(Color::Cyan)
+                .fg(if verify_active {
+                    Color::Cyan
+                } else {
+                    Color::Gray
+                })
                 .add_modifier(Modifier::BOLD),
         )]));
-        frame.render_widget(label, chunks[0]);
+        frame.render_widget(verify_label, chunks[0]);
 
-        let input_block = Block::default()
+        let verify_border = if verify_active {
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        let verify_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            )
+            .border_style(verify_border)
             .title(" Command ");
-        let input_text = Paragraph::new(Line::from(vec![
-            Span::styled(
-                &config_edit.verify_command,
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("_", Style::default().fg(Color::Cyan)),
-        ]))
-        .block(input_block);
-        frame.render_widget(input_text, chunks[1]);
+        let mut verify_spans = vec![Span::styled(
+            &config_edit.verify_command,
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )];
+        if verify_active {
+            verify_spans.push(Span::styled("_", Style::default().fg(Color::Cyan)));
+        }
+        let verify_text = Paragraph::new(Line::from(verify_spans)).block(verify_block);
+        frame.render_widget(verify_text, chunks[1]);
+
+        // Editor command field
+        let editor_label = Paragraph::new(Line::from(vec![Span::styled(
+            "Editor Command",
+            Style::default()
+                .fg(if editor_active {
+                    Color::Cyan
+                } else {
+                    Color::Gray
+                })
+                .add_modifier(Modifier::BOLD),
+        )]));
+        frame.render_widget(editor_label, chunks[3]);
+
+        let editor_border = if editor_active {
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        let editor_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(editor_border)
+            .title(" Command ");
+        let mut editor_spans = vec![Span::styled(
+            &config_edit.editor_command,
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )];
+        if editor_active {
+            editor_spans.push(Span::styled("_", Style::default().fg(Color::Cyan)));
+        }
+        let editor_text = Paragraph::new(Line::from(editor_spans)).block(editor_block);
+        frame.render_widget(editor_text, chunks[4]);
 
         let path_label = Paragraph::new(Line::from(vec![
             Span::styled("Config file: ", Style::default().fg(Color::DarkGray)),
@@ -1111,7 +1225,7 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
                 Style::default().fg(Color::Gray),
             ),
         ]));
-        frame.render_widget(path_label, chunks[3]);
+        frame.render_widget(path_label, chunks[6]);
     }
 
     // Bottom hint bar
@@ -1131,6 +1245,8 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
         .add_modifier(Modifier::BOLD);
 
     let hints = vec![
+        Span::styled(" Tab ", key_style),
+        Span::styled(" Switch field ", desc_style),
         Span::styled(" Ctrl+S ", key_accent),
         Span::styled(" Save ", desc_style),
         Span::styled(" Esc ", key_style),

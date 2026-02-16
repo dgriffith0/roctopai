@@ -24,7 +24,10 @@ use crossterm::{
 };
 
 use app::App;
-use config::{get_verify_command, load_config, save_config, set_verify_command};
+use config::{
+    get_editor_command, get_verify_command, load_config, save_config, set_editor_command,
+    set_verify_command,
+};
 use deps::{check_dependencies, has_missing_required};
 use git::{fetch_worktrees, remove_worktree};
 use github::{close_issue, create_issue, fetch_issues, fetch_prs, fetch_repos};
@@ -189,29 +192,50 @@ fn main() -> Result<()> {
                                 app.config_edit = None;
                                 app.screen = Screen::Board;
                             }
+                            KeyCode::Tab => {
+                                config_edit.active_field =
+                                    if config_edit.active_field == 0 { 1 } else { 0 };
+                            }
                             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                                let cmd = config_edit.verify_command.trim().to_string();
+                                let verify_cmd = config_edit.verify_command.trim().to_string();
+                                let editor_cmd = config_edit.editor_command.trim().to_string();
                                 let repo = app.repo.clone();
-                                if cmd.is_empty() {
-                                    // Remove verify command for this repo
-                                    if let Some(mut config) = load_config() {
+
+                                if let Some(mut config) = load_config() {
+                                    if verify_cmd.is_empty() {
                                         config.verify_commands.remove(&repo);
-                                        let _ = config::save_full_config(&config);
+                                    } else {
+                                        config
+                                            .verify_commands
+                                            .insert(repo.clone(), verify_cmd.clone());
                                     }
-                                    app.status_message = Some("Cleared verify command".to_string());
-                                } else {
-                                    let _ = set_verify_command(&repo, &cmd);
-                                    app.status_message =
-                                        Some(format!("Saved verify command: {}", cmd));
+                                    if editor_cmd.is_empty() {
+                                        config.editor_commands.remove(&repo);
+                                    } else {
+                                        config
+                                            .editor_commands
+                                            .insert(repo.clone(), editor_cmd.clone());
+                                    }
+                                    let _ = config::save_full_config(&config);
                                 }
+
+                                app.status_message = Some("Configuration saved".to_string());
                                 app.config_edit = None;
                                 app.screen = Screen::Board;
                             }
                             KeyCode::Backspace => {
-                                config_edit.verify_command.pop();
+                                if config_edit.active_field == 0 {
+                                    config_edit.verify_command.pop();
+                                } else {
+                                    config_edit.editor_command.pop();
+                                }
                             }
                             KeyCode::Char(c) => {
-                                config_edit.verify_command.push(c);
+                                if config_edit.active_field == 0 {
+                                    config_edit.verify_command.push(c);
+                                } else {
+                                    config_edit.editor_command.push(c);
+                                }
                             }
                             _ => {}
                         }
@@ -488,10 +512,51 @@ fn main() -> Result<()> {
                                         }
                                     }
                                 }
+                                KeyCode::Char('e') if app.active_section == 1 => {
+                                    if let Some(card) = app.worktrees.get(app.selected_card[1]) {
+                                        let worktree_path = card.description.clone();
+                                        if let Some(cmd) = get_editor_command(&app.repo) {
+                                            let parts: Vec<&str> = cmd.split_whitespace().collect();
+                                            if let Some((program, args)) = parts.split_first() {
+                                                let mut alacritty_args = vec![
+                                                    "--working-directory",
+                                                    &worktree_path,
+                                                    "-e",
+                                                ];
+                                                alacritty_args.push(program);
+                                                alacritty_args.extend(args);
+                                                let result = Command::new("alacritty")
+                                                    .args(&alacritty_args)
+                                                    .spawn();
+                                                match result {
+                                                    Ok(_) => {
+                                                        app.status_message = Some(format!(
+                                                            "Opened '{}' in '{}'",
+                                                            card.title, cmd
+                                                        ));
+                                                    }
+                                                    Err(e) => {
+                                                        app.status_message = Some(format!(
+                                                            "Failed to launch editor: {}",
+                                                            e
+                                                        ));
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            app.mode = Mode::EditingEditorCommand {
+                                                input: String::new(),
+                                            };
+                                        }
+                                    }
+                                }
                                 KeyCode::Char('C') => {
-                                    let current_cmd =
+                                    let current_verify =
                                         get_verify_command(&app.repo).unwrap_or_default();
-                                    app.config_edit = Some(ConfigEditState::new(current_cmd));
+                                    let current_editor =
+                                        get_editor_command(&app.repo).unwrap_or_default();
+                                    app.config_edit =
+                                        Some(ConfigEditState::new(current_verify, current_editor));
                                     app.screen = Screen::Configuration;
                                 }
                                 // PR actions: 'o' to open in browser, 'r' to mark ready
@@ -964,6 +1029,43 @@ fn main() -> Result<()> {
                                         Some(format!("Saved verify command: {}", cmd));
 
                                     // Now execute the verify command
+                                    if let Some(card) = app.worktrees.get(app.selected_card[1]) {
+                                        let worktree_path = card.description.clone();
+                                        let parts: Vec<&str> = cmd.split_whitespace().collect();
+                                        if let Some((program, args)) = parts.split_first() {
+                                            let mut alacritty_args =
+                                                vec!["--working-directory", &worktree_path, "-e"];
+                                            alacritty_args.push(program);
+                                            alacritty_args.extend(args);
+                                            let _ = Command::new("alacritty")
+                                                .args(&alacritty_args)
+                                                .spawn();
+                                        }
+                                    }
+                                }
+                                app.mode = Mode::Normal;
+                            }
+                            KeyCode::Backspace => {
+                                input.pop();
+                            }
+                            KeyCode::Char(c) => {
+                                input.push(c);
+                            }
+                            _ => {}
+                        },
+                        Mode::EditingEditorCommand { input } => match key.code {
+                            KeyCode::Esc => {
+                                app.mode = Mode::Normal;
+                            }
+                            KeyCode::Enter => {
+                                let cmd = input.trim().to_string();
+                                if !cmd.is_empty() {
+                                    let repo = app.repo.clone();
+                                    let _ = set_editor_command(&repo, &cmd);
+                                    app.status_message =
+                                        Some(format!("Saved editor command: {}", cmd));
+
+                                    // Now launch the editor
                                     if let Some(card) = app.worktrees.get(app.selected_card[1]) {
                                         let worktree_path = card.description.clone();
                                         let parts: Vec<&str> = cmd.split_whitespace().collect();
