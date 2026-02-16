@@ -23,6 +23,7 @@ pub struct Card {
     pub pr_number: Option<u64>,
     pub is_draft: Option<bool>,
     pub is_merged: Option<bool>,
+    pub head_branch: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -101,6 +102,7 @@ pub enum ConfirmAction {
     MergePr {
         number: u64,
         strategy: MergeStrategy,
+        branch: Option<String>,
     },
     RevertPr {
         number: u64,

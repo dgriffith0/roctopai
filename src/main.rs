@@ -719,6 +719,7 @@ fn main() -> Result<()> {
                                                     "Cannot merge a draft PR".to_string(),
                                                 );
                                             } else {
+                                                let branch = card.head_branch.clone();
                                                 app.confirm_modal = Some(ConfirmModal {
                                                     message: format!(
                                                         "Merge PR #{} with merge strategy?",
@@ -727,6 +728,7 @@ fn main() -> Result<()> {
                                                     on_confirm: ConfirmAction::MergePr {
                                                         number,
                                                         strategy: MergeStrategy::Merge,
+                                                        branch,
                                                     },
                                                 });
                                                 app.mode = Mode::Confirming;
@@ -969,7 +971,11 @@ fn main() -> Result<()> {
                                                 }
                                             }
                                         }
-                                        ConfirmAction::MergePr { number, strategy } => {
+                                        ConfirmAction::MergePr {
+                                            number,
+                                            strategy,
+                                            branch,
+                                        } => {
                                             let repo = app.repo.clone();
                                             let output = Command::new("gh")
                                                 .args([
@@ -984,6 +990,30 @@ fn main() -> Result<()> {
                                                 .output();
                                             match output {
                                                 Ok(o) if o.status.success() => {
+                                                    // Immediately clean up the worktree for the
+                                                    // merged branch instead of waiting for the
+                                                    // next refresh cycle and GitHub API to reflect
+                                                    // the merged state.
+                                                    if let Some(ref branch_name) = branch {
+                                                        if let Some(wt) = app
+                                                            .worktrees
+                                                            .iter()
+                                                            .find(|w| w.title == *branch_name)
+                                                        {
+                                                            let wt_path = wt.description.clone();
+                                                            let wt_branch = wt.title.clone();
+                                                            if remove_worktree(&wt_path, &wt_branch)
+                                                                .is_ok()
+                                                            {
+                                                                app.set_status(format!(
+                                                                    "Merged PR #{} ({}) — cleaned up worktree '{}'",
+                                                                    number,
+                                                                    strategy.label(),
+                                                                    wt_branch
+                                                                ));
+                                                            }
+                                                        }
+                                                    }
                                                     app.pull_requests = fetch_prs(
                                                         &repo,
                                                         app.pr_state_filter,
@@ -994,11 +1024,17 @@ fn main() -> Result<()> {
                                                         fetch_sessions(&app.session_states);
                                                     app.clamp_selected();
                                                     app.last_refresh = std::time::Instant::now();
-                                                    app.set_status(format!(
-                                                        "Merged PR #{} ({})",
-                                                        number,
-                                                        strategy.label()
-                                                    ));
+                                                    if branch.is_none()
+                                                        || app.worktrees.iter().any(|w| {
+                                                            branch.as_deref() == Some(&w.title)
+                                                        })
+                                                    {
+                                                        app.set_status(format!(
+                                                            "Merged PR #{} ({})",
+                                                            number,
+                                                            strategy.label()
+                                                        ));
+                                                    }
                                                 }
                                                 Ok(o) => {
                                                     let stderr = String::from_utf8_lossy(&o.stderr);

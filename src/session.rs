@@ -91,6 +91,7 @@ pub fn fetch_sessions(socket_states: &SessionStates) -> Vec<Card> {
                 pr_number: None,
                 is_draft: None,
                 is_merged: None,
+                head_branch: None,
             }
         })
         .collect()

@@ -119,6 +119,7 @@ pub fn fetch_issues(repo: &str, state: StateFilter, assignee: AssigneeFilter) ->
                 pr_number: None,
                 is_draft: None,
                 is_merged: None,
+                head_branch: None,
             }
         })
         .collect();
@@ -201,6 +202,7 @@ pub fn fetch_prs(repo: &str, state: StateFilter, assignee: AssigneeFilter) -> Ve
                 pr_number: Some(number),
                 is_draft: Some(is_draft),
                 is_merged: Some(is_merged),
+                head_branch: Some(branch),
             }
         })
         .collect();

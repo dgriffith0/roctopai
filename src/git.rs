@@ -76,6 +76,7 @@ pub fn fetch_worktrees() -> Vec<Card> {
             pr_number: None,
             is_draft: None,
             is_merged: None,
+            head_branch: None,
         });
     }
 
