@@ -14,7 +14,7 @@ use crate::config::config_path;
 use crate::deps::Dependency;
 use crate::models::{
     card_matches, Card, ConfirmModal, IssueModal, Mode, RepoSelectPhase, RepoSelectState,
-    TextInput, REFRESH_INTERVAL,
+    StateFilter, TextInput, REFRESH_INTERVAL,
 };
 use crate::session::{
     COMMAND_SHORTCUTS, DEFAULT_CLAUDE_COMMAND, DEFAULT_EDITOR_COMMAND, EDITOR_TEMPLATE_FIELDS,
@@ -604,8 +604,10 @@ pub fn ui(frame: &mut Frame, app: &App) {
             0 => {
                 area_spans.push(Span::styled(" w ", key_accent));
                 area_spans.push(Span::styled(" Worktree+Session ", desc_style));
-                area_spans.push(Span::styled(" d ", key_style));
-                area_spans.push(Span::styled(" Close issue ", desc_style));
+                if app.issue_state_filter == StateFilter::Open {
+                    area_spans.push(Span::styled(" d ", key_style));
+                    area_spans.push(Span::styled(" Close issue ", desc_style));
+                }
                 area_spans.push(Span::styled(" s ", key_style));
                 area_spans.push(Span::styled(" Open/Closed ", desc_style));
                 area_spans.push(Span::styled(" m ", key_style));

@@ -34,8 +34,8 @@ use github::{close_issue, create_issue, fetch_issues, fetch_prs, fetch_repos};
 use hooks::start_event_socket;
 use models::{
     ConfigEditState, ConfirmAction, ConfirmModal, IssueModal, IssueSubmitResult, MergeStrategy,
-    MessageLog, Mode, RepoSelectPhase, Screen, SessionStates, TextInput, REFRESH_INTERVAL,
-    SOCKET_PATH,
+    MessageLog, Mode, RepoSelectPhase, Screen, SessionStates, StateFilter, TextInput,
+    REFRESH_INTERVAL, SOCKET_PATH,
 };
 use session::{
     attach_tmux_session, create_worktree_and_session, expand_editor_command, fetch_sessions,
@@ -513,7 +513,10 @@ fn main() -> Result<()> {
                                         }
                                     }
                                 }
-                                KeyCode::Char('d') if app.active_section == 0 => {
+                                KeyCode::Char('d')
+                                    if app.active_section == 0
+                                        && app.issue_state_filter == StateFilter::Open =>
+                                {
                                     if let Some(card) = app.issues.get(app.selected_card[0]) {
                                         if let Some(num_str) = card.id.strip_prefix("issue-") {
                                             if let Ok(number) = num_str.parse::<u64>() {
