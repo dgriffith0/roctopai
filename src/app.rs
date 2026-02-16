@@ -3,7 +3,7 @@ use std::sync::mpsc;
 use std::time::Instant;
 
 use crate::deps::Dependency;
-use crate::git::{cleanup_merged_worktrees, fetch_worktrees};
+use crate::git::{cleanup_merged_worktrees, fetch_main_behind_count, fetch_worktrees};
 use crate::github::{fetch_issues, fetch_prs};
 use crate::hooks::ensure_hook_script;
 use crate::models::{
@@ -39,6 +39,7 @@ pub struct App {
     pub message_log: MessageLog,
     pub show_messages: bool,
     pub messages_expanded: bool,
+    pub main_behind_count: usize,
 }
 
 impl App {
@@ -73,6 +74,7 @@ impl App {
             message_log: message_log.clone(),
             show_messages: true,
             messages_expanded: false,
+            main_behind_count: 0,
         }
     }
 
@@ -186,6 +188,7 @@ impl App {
         }
 
         self.sessions = fetch_sessions(&self.session_states);
+        self.main_behind_count = fetch_main_behind_count();
         self.clamp_selected();
         self.last_refresh = Instant::now();
     }

@@ -408,7 +408,7 @@ pub fn ui(frame: &mut Frame, app: &App) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan))
         .title(" Repository ");
-    let repo_text = Paragraph::new(Line::from(vec![
+    let mut repo_spans = vec![
         Span::styled("  ", Style::default()),
         Span::styled(
             &app.repo,
@@ -416,9 +416,24 @@ pub fn ui(frame: &mut Frame, app: &App) {
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("  (Enter to change)", Style::default().fg(Color::DarkGray)),
-    ]))
-    .block(repo_block);
+    ];
+    if app.main_behind_count > 0 {
+        repo_spans.push(Span::styled(
+            format!(
+                "  main is {} commit{} behind",
+                app.main_behind_count,
+                if app.main_behind_count == 1 { "" } else { "s" }
+            ),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    repo_spans.push(Span::styled(
+        "  (Enter to change)",
+        Style::default().fg(Color::DarkGray),
+    ));
+    let repo_text = Paragraph::new(Line::from(repo_spans)).block(repo_block);
     frame.render_widget(repo_text, outer[0]);
 
     // Four columns

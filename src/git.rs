@@ -126,6 +126,47 @@ pub fn cleanup_merged_worktrees(repo: &str, worktrees: &[Card]) -> Vec<String> {
     cleaned
 }
 
+/// Check how many commits the local main/master branch is behind its remote tracking branch.
+/// Runs `git fetch` first to ensure we have the latest remote state.
+pub fn fetch_main_behind_count() -> usize {
+    // Fetch latest from remote (quiet, don't fail if offline)
+    let _ = Command::new("git").args(["fetch", "--quiet"]).output();
+
+    // Determine main branch name
+    let branch = if Command::new("git")
+        .args(["rev-parse", "--verify", "refs/heads/main"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        "main"
+    } else if Command::new("git")
+        .args(["rev-parse", "--verify", "refs/heads/master"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        "master"
+    } else {
+        return 0;
+    };
+
+    // Count commits that are on the remote but not on the local branch
+    let local = format!("refs/heads/{}", branch);
+    let remote = format!("refs/remotes/origin/{}", branch);
+    let output = Command::new("git")
+        .args(["rev-list", "--count", &format!("{}..{}", local, remote)])
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
+            .trim()
+            .parse::<usize>()
+            .unwrap_or(0),
+        _ => 0,
+    }
+}
+
 pub fn trust_directory(path: &str) -> std::result::Result<(), String> {
     let claude_json = dirs::home_dir()
         .ok_or("Could not find home directory")?
