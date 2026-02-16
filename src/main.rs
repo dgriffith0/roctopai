@@ -441,8 +441,6 @@ fn main() -> Result<()> {
                             _ => {}
                         },
                         Mode::Normal => {
-                            // Clear status message on any keypress
-                            app.status_message = None;
                             match key.code {
                                 KeyCode::Char('q') | KeyCode::Esc => break,
                                 KeyCode::Enter => {

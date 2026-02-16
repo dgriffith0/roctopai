@@ -496,17 +496,6 @@ pub fn ui(frame: &mut Frame, app: &App) {
     // Top line: global actions (or mode-specific actions for non-Normal modes)
     let mut global_spans: Vec<Span> = Vec::new();
 
-    // Status message prefix
-    if let Some(msg) = &app.status_message {
-        global_spans.push(Span::styled(
-            format!(" {} ", msg),
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        ));
-        global_spans.push(Span::styled(" | ", desc_style));
-    }
-
     let global_mode_spans: Vec<Span> = match &app.mode {
         Mode::Normal => {
             vec![
