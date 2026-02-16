@@ -29,7 +29,7 @@ use config::{
     load_config, save_config, set_editor_command, set_verify_command,
 };
 use deps::{check_dependencies, has_missing_required};
-use git::{detect_current_repo, fetch_worktrees, remove_worktree};
+use git::{detect_current_repo, fetch_worktrees, pull_main, remove_worktree};
 use github::{close_issue, create_issue, fetch_issues, fetch_prs, fetch_repos};
 use hooks::start_event_socket;
 use models::{
@@ -480,6 +480,18 @@ fn main() -> Result<()> {
                                     app.refresh_data();
                                     app.set_status("Refreshed".to_string());
                                 }
+                                KeyCode::Char('p') => match pull_main() {
+                                    Ok(branch) => {
+                                        app.main_behind_count = 0;
+                                        app.set_status(format!(
+                                            "Pulled latest changes for {}",
+                                            branch
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        app.set_status(format!("Pull failed: {}", e));
+                                    }
+                                },
                                 KeyCode::Char('D') => {
                                     app.dependencies = check_dependencies();
                                     app.screen = Screen::Dependencies;

@@ -428,6 +428,10 @@ pub fn ui(frame: &mut Frame, app: &App) {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         ));
+        repo_spans.push(Span::styled(
+            " (p to pull)",
+            Style::default().fg(Color::DarkGray),
+        ));
     }
     repo_spans.push(Span::styled(
         "  (Enter to change)",
@@ -526,6 +530,8 @@ pub fn ui(frame: &mut Frame, app: &App) {
                 Span::styled(" Change repo ", desc_style),
                 Span::styled(" R ", key_style),
                 Span::styled(" Refresh ", desc_style),
+                Span::styled(" p ", key_style),
+                Span::styled(" Pull ", desc_style),
                 Span::styled(" n ", key_accent),
                 Span::styled(" New issue ", desc_style),
                 Span::styled(" D ", key_style),

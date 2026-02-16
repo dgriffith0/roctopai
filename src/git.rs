@@ -156,6 +156,41 @@ pub fn cleanup_merged_worktrees(repo: &str, worktrees: &[Card], mux: Multiplexer
     cleaned
 }
 
+/// Pull the latest changes for the local main/master branch from origin.
+/// Returns Ok(branch_name) on success or Err(message) on failure.
+pub fn pull_main() -> std::result::Result<String, String> {
+    // Determine main branch name
+    let branch = if Command::new("git")
+        .args(["rev-parse", "--verify", "refs/heads/main"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        "main"
+    } else if Command::new("git")
+        .args(["rev-parse", "--verify", "refs/heads/master"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        "master"
+    } else {
+        return Err("Could not determine main branch".to_string());
+    };
+
+    let output = Command::new("git")
+        .args(["pull", "origin", branch])
+        .output()
+        .map_err(|e| format!("Failed to run git pull: {}", e))?;
+
+    if output.status.success() {
+        Ok(branch.to_string())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!("git pull failed: {}", stderr.trim()))
+    }
+}
+
 /// Check how many commits the local main/master branch is behind its remote tracking branch.
 /// Runs `git fetch` first to ensure we have the latest remote state.
 pub fn fetch_main_behind_count() -> usize {
