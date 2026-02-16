@@ -114,7 +114,10 @@ pub const DEFAULT_CLAUDE_COMMAND: &str =
 /// Available template fields for the claude command configuration.
 /// Each tuple is (field_name, description).
 pub const TEMPLATE_FIELDS: &[(&str, &str)] = &[
-    ("{prompt_file}", "Path to temp file containing the prompt"),
+    (
+        "{prompt_file}",
+        "Path to temp file containing the prompt (issue number, repo, title, body, and instructions to implement a fix, commit, and open a PR)",
+    ),
     ("{issue_number}", "GitHub issue number"),
     ("{repo}", "Full repo name (owner/repo)"),
     ("{title}", "Issue title"),
