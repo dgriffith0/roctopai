@@ -25,8 +25,8 @@ use crossterm::{
 
 use app::App;
 use config::{
-    get_editor_command, get_pr_ready, get_session_command, get_verify_command, load_config,
-    save_config, set_editor_command, set_verify_command,
+    get_editor_command, get_multiplexer, get_pr_ready, get_session_command, get_verify_command,
+    load_config, save_config, set_editor_command, set_verify_command,
 };
 use deps::{check_dependencies, has_missing_required};
 use git::{detect_current_repo, fetch_worktrees, remove_worktree};
@@ -53,7 +53,9 @@ fn main() -> Result<()> {
 
     let mut terminal =
         ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(io::stdout()))?;
-    let multiplexer = Multiplexer::detect().unwrap_or(Multiplexer::Tmux);
+    let multiplexer = get_multiplexer()
+        .or_else(Multiplexer::detect)
+        .unwrap_or(Multiplexer::Tmux);
     let mut app = App::new(session_states, message_log, multiplexer);
 
     // Check external dependencies on startup
@@ -210,7 +212,7 @@ fn main() -> Result<()> {
                                 app.screen = Screen::Board;
                             }
                             KeyCode::Tab => {
-                                config_edit.active_field = (config_edit.active_field + 1) % 4;
+                                config_edit.active_field = (config_edit.active_field + 1) % 5;
                             }
                             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                                 let verify_cmd =
@@ -250,9 +252,11 @@ fn main() -> Result<()> {
                                             .session_commands
                                             .insert(repo.clone(), claude_cmd.clone());
                                     }
+                                    config.multiplexer = Some(config_edit.multiplexer);
                                     let _ = config::save_full_config(&config);
                                 }
 
+                                app.multiplexer = config_edit.multiplexer;
                                 app.set_status("Configuration saved".to_string());
                                 app.config_edit = None;
                                 app.screen = Screen::Board;
@@ -287,11 +291,18 @@ fn main() -> Result<()> {
                                 3 => config_edit.session_command.move_end(),
                                 _ => {}
                             },
-                            KeyCode::Char(' ') if config_edit.active_field == 2 => {
+                            KeyCode::Char(' ') | KeyCode::Enter
+                                if config_edit.active_field == 2 =>
+                            {
                                 config_edit.pr_ready = !config_edit.pr_ready;
                             }
-                            KeyCode::Enter if config_edit.active_field == 2 => {
-                                config_edit.pr_ready = !config_edit.pr_ready;
+                            KeyCode::Char(' ') | KeyCode::Enter
+                                if config_edit.active_field == 4 =>
+                            {
+                                config_edit.multiplexer = match config_edit.multiplexer {
+                                    Multiplexer::Tmux => Multiplexer::Screen,
+                                    Multiplexer::Screen => Multiplexer::Tmux,
+                                };
                             }
                             KeyCode::Char(c) => match config_edit.active_field {
                                 0 => config_edit.verify_command.insert(c),
@@ -643,6 +654,7 @@ fn main() -> Result<()> {
                                         current_editor,
                                         current_pr_ready,
                                         current_claude,
+                                        app.multiplexer,
                                     ));
                                     app.screen = Screen::Configuration;
                                 }

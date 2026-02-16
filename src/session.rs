@@ -2,13 +2,15 @@ use std::fs;
 use std::process::Command;
 
 use ratatui::style::Color;
+use serde::{Deserialize, Serialize};
 
 use crate::git::{get_repo_name, trust_directory};
 use crate::hooks::write_worktree_hook_config;
 use crate::models::{Card, SessionStates};
 
 /// Supported terminal multiplexers.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Multiplexer {
     Tmux,
     Screen,
@@ -34,7 +36,7 @@ impl Multiplexer {
         }
     }
 
-    pub fn name(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             Multiplexer::Tmux => "tmux",
             Multiplexer::Screen => "screen",
