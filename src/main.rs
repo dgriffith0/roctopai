@@ -34,7 +34,7 @@ use github::{close_issue, create_issue, fetch_issues, fetch_prs, fetch_repos};
 use hooks::start_event_socket;
 use models::{
     ConfigEditState, ConfirmAction, ConfirmModal, IssueModal, IssueSubmitResult, MergeStrategy,
-    Mode, RepoSelectPhase, Screen, SessionStates, REFRESH_INTERVAL, SOCKET_PATH,
+    Mode, RepoSelectPhase, Screen, SessionStates, TextInput, REFRESH_INTERVAL, SOCKET_PATH,
 };
 use session::{
     attach_tmux_session, create_worktree_and_session, expand_editor_command, fetch_sessions,
@@ -198,9 +198,12 @@ fn main() -> Result<()> {
                                 config_edit.active_field = (config_edit.active_field + 1) % 4;
                             }
                             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                                let verify_cmd = config_edit.verify_command.trim().to_string();
-                                let editor_cmd = config_edit.editor_command.trim().to_string();
-                                let claude_cmd = config_edit.claude_command.trim().to_string();
+                                let verify_cmd =
+                                    config_edit.verify_command.value().trim().to_string();
+                                let editor_cmd =
+                                    config_edit.editor_command.value().trim().to_string();
+                                let claude_cmd =
+                                    config_edit.claude_command.value().trim().to_string();
                                 let repo = app.repo.clone();
 
                                 let pr_ready = config_edit.pr_ready;
@@ -240,15 +243,33 @@ fn main() -> Result<()> {
                                 app.screen = Screen::Board;
                             }
                             KeyCode::Backspace => match config_edit.active_field {
-                                0 => {
-                                    config_edit.verify_command.pop();
-                                }
-                                1 => {
-                                    config_edit.editor_command.pop();
-                                }
-                                3 => {
-                                    config_edit.claude_command.pop();
-                                }
+                                0 => config_edit.verify_command.delete_back(),
+                                1 => config_edit.editor_command.delete_back(),
+                                3 => config_edit.claude_command.delete_back(),
+                                _ => {}
+                            },
+                            KeyCode::Left => match config_edit.active_field {
+                                0 => config_edit.verify_command.move_left(),
+                                1 => config_edit.editor_command.move_left(),
+                                3 => config_edit.claude_command.move_left(),
+                                _ => {}
+                            },
+                            KeyCode::Right => match config_edit.active_field {
+                                0 => config_edit.verify_command.move_right(),
+                                1 => config_edit.editor_command.move_right(),
+                                3 => config_edit.claude_command.move_right(),
+                                _ => {}
+                            },
+                            KeyCode::Home => match config_edit.active_field {
+                                0 => config_edit.verify_command.move_home(),
+                                1 => config_edit.editor_command.move_home(),
+                                3 => config_edit.claude_command.move_home(),
+                                _ => {}
+                            },
+                            KeyCode::End => match config_edit.active_field {
+                                0 => config_edit.verify_command.move_end(),
+                                1 => config_edit.editor_command.move_end(),
+                                3 => config_edit.claude_command.move_end(),
                                 _ => {}
                             },
                             KeyCode::Char(' ') if config_edit.active_field == 2 => {
@@ -258,15 +279,9 @@ fn main() -> Result<()> {
                                 config_edit.pr_ready = !config_edit.pr_ready;
                             }
                             KeyCode::Char(c) => match config_edit.active_field {
-                                0 => {
-                                    config_edit.verify_command.push(c);
-                                }
-                                1 => {
-                                    config_edit.editor_command.push(c);
-                                }
-                                3 => {
-                                    config_edit.claude_command.push(c);
-                                }
+                                0 => config_edit.verify_command.insert(c),
+                                1 => config_edit.editor_command.insert(c),
+                                3 => config_edit.claude_command.insert(c),
                                 _ => {}
                             },
                             _ => {}
@@ -284,7 +299,7 @@ fn main() -> Result<()> {
                                 }
                             }
                             KeyCode::Enter => {
-                                let owner = app.repo_select.input.trim().to_string();
+                                let owner = app.repo_select.input.value().trim().to_string();
                                 if owner.is_empty() {
                                     app.repo_select.error =
                                         Some("Please enter an org or user name".into());
@@ -311,10 +326,22 @@ fn main() -> Result<()> {
                                 }
                             }
                             KeyCode::Backspace => {
-                                app.repo_select.input.pop();
+                                app.repo_select.input.delete_back();
+                            }
+                            KeyCode::Left => {
+                                app.repo_select.input.move_left();
+                            }
+                            KeyCode::Right => {
+                                app.repo_select.input.move_right();
+                            }
+                            KeyCode::Home => {
+                                app.repo_select.input.move_home();
+                            }
+                            KeyCode::End => {
+                                app.repo_select.input.move_end();
                             }
                             KeyCode::Char(c) => {
-                                app.repo_select.input.push(c);
+                                app.repo_select.input.insert(c);
                             }
                             _ => {}
                         },
@@ -358,12 +385,18 @@ fn main() -> Result<()> {
                                 app.repo_select.update_filtered();
                             }
                             KeyCode::Backspace => {
-                                app.repo_select.filter_query.pop();
+                                app.repo_select.filter_query.delete_back();
                                 app.repo_select.update_filtered();
+                            }
+                            KeyCode::Left => {
+                                app.repo_select.filter_query.move_left();
+                            }
+                            KeyCode::Right => {
+                                app.repo_select.filter_query.move_right();
                             }
                             KeyCode::Char(c) => {
                                 if c != '/' {
-                                    app.repo_select.filter_query.push(c);
+                                    app.repo_select.filter_query.insert(c);
                                     app.repo_select.update_filtered();
                                 }
                             }
@@ -378,8 +411,20 @@ fn main() -> Result<()> {
                                 app.mode = Mode::Normal;
                             }
                             KeyCode::Backspace => {
-                                query.pop();
+                                query.delete_back();
                                 app.clamp_selected();
+                            }
+                            KeyCode::Left => {
+                                query.move_left();
+                            }
+                            KeyCode::Right => {
+                                query.move_right();
+                            }
+                            KeyCode::Home => {
+                                query.move_home();
+                            }
+                            KeyCode::End => {
+                                query.move_end();
                             }
                             KeyCode::Up => {
                                 app.move_card_up();
@@ -388,7 +433,7 @@ fn main() -> Result<()> {
                                 app.move_card_down();
                             }
                             KeyCode::Char(c) => {
-                                query.push(c);
+                                query.insert(c);
                                 app.clamp_selected();
                             }
                             _ => {}
@@ -417,7 +462,7 @@ fn main() -> Result<()> {
                                 }
                                 KeyCode::Char('/') => {
                                     app.mode = Mode::Filtering {
-                                        query: String::new(),
+                                        query: TextInput::new(),
                                     };
                                 }
                                 KeyCode::Char('n') => {
@@ -533,7 +578,7 @@ fn main() -> Result<()> {
                                         } else {
                                             // No verify command configured — prompt user
                                             app.mode = Mode::EditingVerifyCommand {
-                                                input: String::new(),
+                                                input: TextInput::new(),
                                             };
                                         }
                                     }
@@ -562,7 +607,7 @@ fn main() -> Result<()> {
                                             }
                                         } else {
                                             app.mode = Mode::EditingEditorCommand {
-                                                input: String::new(),
+                                                input: TextInput::new(),
                                             };
                                         }
                                     }
@@ -983,13 +1028,13 @@ fn main() -> Result<()> {
                                         if key.modifiers.contains(KeyModifiers::CONTROL)
                                             && !modal.submitting =>
                                     {
-                                        let title = modal.title.trim().to_string();
+                                        let title = modal.title.value().trim().to_string();
                                         if title.is_empty() {
                                             modal.error = Some("Title cannot be empty".to_string());
                                         } else {
                                             modal.submitting = true;
                                             modal.error = None;
-                                            let body = modal.body.clone();
+                                            let body = modal.body.value().to_string();
                                             let repo = app.repo.clone();
                                             let hook_script = app.hook_script_path.clone();
                                             let claude_cmd = get_claude_command(&repo);
@@ -1025,20 +1070,48 @@ fn main() -> Result<()> {
                                     }
                                     KeyCode::Backspace => {
                                         if modal.active_field == 0 {
-                                            modal.title.pop();
+                                            modal.title.delete_back();
                                         } else {
-                                            modal.body.pop();
+                                            modal.body.delete_back();
+                                        }
+                                    }
+                                    KeyCode::Left => {
+                                        if modal.active_field == 0 {
+                                            modal.title.move_left();
+                                        } else {
+                                            modal.body.move_left();
+                                        }
+                                    }
+                                    KeyCode::Right => {
+                                        if modal.active_field == 0 {
+                                            modal.title.move_right();
+                                        } else {
+                                            modal.body.move_right();
+                                        }
+                                    }
+                                    KeyCode::Home => {
+                                        if modal.active_field == 0 {
+                                            modal.title.move_home();
+                                        } else {
+                                            modal.body.move_home();
+                                        }
+                                    }
+                                    KeyCode::End => {
+                                        if modal.active_field == 0 {
+                                            modal.title.move_end();
+                                        } else {
+                                            modal.body.move_end();
                                         }
                                     }
                                     KeyCode::Char(c) => {
                                         if modal.active_field == 0 {
-                                            modal.title.push(c);
+                                            modal.title.insert(c);
                                         } else {
-                                            modal.body.push(c);
+                                            modal.body.insert(c);
                                         }
                                     }
                                     KeyCode::Enter if modal.active_field == 1 => {
-                                        modal.body.push('\n');
+                                        modal.body.insert('\n');
                                     }
                                     _ => {}
                                 }
@@ -1049,7 +1122,7 @@ fn main() -> Result<()> {
                                 app.mode = Mode::Normal;
                             }
                             KeyCode::Enter => {
-                                let cmd = input.trim().to_string();
+                                let cmd = input.value().trim().to_string();
                                 if !cmd.is_empty() {
                                     let repo = app.repo.clone();
                                     let _ = set_verify_command(&repo, &cmd);
@@ -1066,10 +1139,22 @@ fn main() -> Result<()> {
                                 app.mode = Mode::Normal;
                             }
                             KeyCode::Backspace => {
-                                input.pop();
+                                input.delete_back();
+                            }
+                            KeyCode::Left => {
+                                input.move_left();
+                            }
+                            KeyCode::Right => {
+                                input.move_right();
+                            }
+                            KeyCode::Home => {
+                                input.move_home();
+                            }
+                            KeyCode::End => {
+                                input.move_end();
                             }
                             KeyCode::Char(c) => {
-                                input.push(c);
+                                input.insert(c);
                             }
                             _ => {}
                         },
@@ -1078,7 +1163,7 @@ fn main() -> Result<()> {
                                 app.mode = Mode::Normal;
                             }
                             KeyCode::Enter => {
-                                let cmd = input.trim().to_string();
+                                let cmd = input.value().trim().to_string();
                                 if !cmd.is_empty() {
                                     let repo = app.repo.clone();
                                     let _ = set_editor_command(&repo, &cmd);
@@ -1095,10 +1180,22 @@ fn main() -> Result<()> {
                                 app.mode = Mode::Normal;
                             }
                             KeyCode::Backspace => {
-                                input.pop();
+                                input.delete_back();
+                            }
+                            KeyCode::Left => {
+                                input.move_left();
+                            }
+                            KeyCode::Right => {
+                                input.move_right();
+                            }
+                            KeyCode::Home => {
+                                input.move_home();
+                            }
+                            KeyCode::End => {
+                                input.move_end();
                             }
                             KeyCode::Char(c) => {
-                                input.push(c);
+                                input.insert(c);
                             }
                             _ => {}
                         },

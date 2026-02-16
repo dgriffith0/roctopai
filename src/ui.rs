@@ -14,11 +14,39 @@ use crate::config::config_path;
 use crate::deps::Dependency;
 use crate::models::{
     card_matches, Card, ConfirmModal, IssueModal, Mode, RepoSelectPhase, RepoSelectState,
-    REFRESH_INTERVAL,
+    TextInput, REFRESH_INTERVAL,
 };
 use crate::session::{
     DEFAULT_CLAUDE_COMMAND, DEFAULT_EDITOR_COMMAND, EDITOR_TEMPLATE_FIELDS, TEMPLATE_FIELDS,
 };
+
+/// Build spans for a TextInput showing the cursor at the correct position.
+/// Returns spans: [before_cursor (styled), cursor_char (cursor_style), after_cursor (styled)]
+fn text_input_spans(
+    input: &TextInput,
+    text_style: Style,
+    cursor_style: Style,
+    show_cursor: bool,
+) -> Vec<Span<'_>> {
+    if !show_cursor {
+        return vec![Span::styled(input.value(), text_style)];
+    }
+    let before = input.before_cursor();
+    let after = input.after_cursor();
+    let mut spans = vec![Span::styled(before.to_string(), text_style)];
+    // Show cursor: if there's a char at cursor, highlight it; otherwise show "_"
+    let mut after_chars = after.chars();
+    if let Some(c) = after_chars.next() {
+        spans.push(Span::styled(c.to_string(), cursor_style));
+        let rest: String = after_chars.collect();
+        if !rest.is_empty() {
+            spans.push(Span::styled(rest, text_style));
+        }
+    } else {
+        spans.push(Span::styled("_", cursor_style));
+    }
+    spans
+}
 
 pub fn ui_repo_select(frame: &mut Frame, state: &RepoSelectState) {
     let area = frame.area();
@@ -72,15 +100,16 @@ pub fn ui_repo_select(frame: &mut Frame, state: &RepoSelectState) {
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::White))
                 .title(" Owner ");
-            let input_text = Paragraph::new(Line::from(vec![
-                Span::styled(
-                    &state.input,
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("_", Style::default().fg(Color::Cyan)),
-            ]))
+            let text_style = Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD);
+            let cursor_style = Style::default().fg(Color::Black).bg(Color::Cyan);
+            let input_text = Paragraph::new(Line::from(text_input_spans(
+                &state.input,
+                text_style,
+                cursor_style,
+                true,
+            )))
             .block(input_block);
             frame.render_widget(input_text, chunks[1]);
 
@@ -151,16 +180,18 @@ pub fn ui_repo_select(frame: &mut Frame, state: &RepoSelectState) {
                     Style::default().fg(Color::DarkGray),
                 )]))
             } else {
-                Paragraph::new(Line::from(vec![
-                    Span::styled("/ ", Style::default().fg(Color::Cyan)),
-                    Span::styled(
-                        &state.filter_query,
-                        Style::default()
-                            .fg(Color::White)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled("_", Style::default().fg(Color::Cyan)),
-                ]))
+                let mut spans = vec![Span::styled("/ ", Style::default().fg(Color::Cyan))];
+                let text_style = Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD);
+                let cursor_style = Style::default().fg(Color::Black).bg(Color::Cyan);
+                spans.extend(text_input_spans(
+                    &state.filter_query,
+                    text_style,
+                    cursor_style,
+                    true,
+                ));
+                Paragraph::new(Line::from(spans))
             };
             frame.render_widget(filter_line, chunks[1]);
 
@@ -407,7 +438,7 @@ pub fn ui(frame: &mut Frame, app: &App) {
     ];
 
     let filter_query = match &app.mode {
-        Mode::Filtering { query } => Some(query.as_str()),
+        Mode::Filtering { query } => Some(query),
         _ => None,
     };
 
@@ -428,7 +459,7 @@ pub fn ui(frame: &mut Frame, app: &App) {
             *color,
             cards,
             is_active,
-            query,
+            query.map(|q| q.value()),
             selected,
             &related_ids,
         );
@@ -617,12 +648,16 @@ pub fn ui(frame: &mut Frame, app: &App) {
 
     // Render verify command prompt overlay if in EditingVerifyCommand mode
     if let Mode::EditingVerifyCommand { input } = &app.mode {
-        ui_verify_prompt(frame, input);
+        ui_text_prompt(frame, input, "Set Verify Command", Color::Yellow,
+            "No verify command configured. Use {directory} for the worktree path:",
+            "e.g. alacritty --working-directory {directory} -e cargo run  |  Enter: save & run  Esc: cancel");
     }
 
     // Render editor command prompt overlay if in EditingEditorCommand mode
     if let Mode::EditingEditorCommand { input } = &app.mode {
-        ui_editor_prompt(frame, input);
+        ui_text_prompt(frame, input, "Set Editor Command", Color::Green,
+            "No editor configured. Use {directory} for the worktree path:",
+            "e.g. alacritty --working-directory {directory} -e nvim  |  Enter: save & open  Esc: cancel");
     }
 }
 
@@ -693,21 +728,18 @@ fn ui_issue_modal(frame: &mut Frame, modal: &IssueModal, spinner_tick: usize) {
         .borders(Borders::ALL)
         .border_style(title_style)
         .title(" Title ");
-    let title_text = Paragraph::new(Line::from(vec![
-        Span::styled(
-            &modal.title,
-            Style::default().fg(if modal.submitting {
-                Color::DarkGray
-            } else {
-                Color::White
-            }),
-        ),
-        if modal.active_field == 0 && !modal.submitting {
-            Span::styled("_", Style::default().fg(Color::Cyan))
-        } else {
-            Span::raw("")
-        },
-    ]))
+    let text_color = if modal.submitting {
+        Color::DarkGray
+    } else {
+        Color::White
+    };
+    let show_title_cursor = modal.active_field == 0 && !modal.submitting;
+    let title_text = Paragraph::new(Line::from(text_input_spans(
+        &modal.title,
+        Style::default().fg(text_color),
+        Style::default().fg(Color::Black).bg(Color::Cyan),
+        show_title_cursor,
+    )))
     .block(title_block);
     frame.render_widget(title_text, chunks[0]);
 
@@ -725,16 +757,32 @@ fn ui_issue_modal(frame: &mut Frame, modal: &IssueModal, spinner_tick: usize) {
         .borders(Borders::ALL)
         .border_style(body_style)
         .title(" Body ");
-    let mut body_text = modal.body.clone();
-    if modal.active_field == 1 && !modal.submitting {
-        body_text.push('_');
-    }
-    let body_paragraph = Paragraph::new(body_text)
-        .style(Style::default().fg(if modal.submitting {
-            Color::DarkGray
+    let show_body_cursor = modal.active_field == 1 && !modal.submitting;
+    // For multi-line body, insert cursor character at position
+    let body_display = if show_body_cursor {
+        let before = modal.body.before_cursor();
+        let after = modal.body.after_cursor();
+        if after.is_empty() {
+            format!("{}_", before)
         } else {
-            Color::White
-        }))
+            // Use a block cursor by wrapping char in markers isn't possible in plain text,
+            // so we insert an underscore cursor indicator
+            let mut after_chars = after.chars();
+            let cursor_char = after_chars.next().unwrap();
+            // We can't easily style individual chars in a plain string for Paragraph,
+            // so show the cursor as the text with a visible marker
+            format!(
+                "{}[{}]{}",
+                before,
+                cursor_char,
+                after_chars.collect::<String>()
+            )
+        }
+    } else {
+        modal.body.value().to_string()
+    };
+    let body_paragraph = Paragraph::new(body_display)
+        .style(Style::default().fg(text_color))
         .block(body_block)
         .wrap(Wrap { trim: false });
     frame.render_widget(body_paragraph, chunks[1]);
@@ -983,19 +1031,26 @@ fn render_card(frame: &mut Frame, area: Rect, card: &Card, is_selected: bool, is
     frame.render_widget(desc, lines[1]);
 }
 
-fn ui_verify_prompt(frame: &mut Frame, input: &str) {
+fn ui_text_prompt(
+    frame: &mut Frame,
+    input: &TextInput,
+    title: &str,
+    color: Color,
+    label_text: &str,
+    hint_text: &str,
+) {
     let area = centered_rect(50, 20, frame.area());
 
     frame.render_widget(Clear, area);
 
     let outer_block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow))
-        .title(" Set Verify Command ")
+        .border_style(Style::default().fg(color))
+        .title(format!(" {} ", title))
         .title_style(
             Style::default()
                 .fg(Color::Black)
-                .bg(Color::Yellow)
+                .bg(color)
                 .add_modifier(Modifier::BOLD),
         )
         .padding(Padding::new(1, 1, 1, 0));
@@ -1012,7 +1067,7 @@ fn ui_verify_prompt(frame: &mut Frame, input: &str) {
         .split(inner);
 
     let label = Paragraph::new(Line::from(vec![Span::styled(
-        "No verify command configured. Use {directory} for the worktree path:",
+        label_text,
         Style::default().fg(Color::White),
     )]));
     frame.render_widget(label, chunks[0]);
@@ -1021,77 +1076,21 @@ fn ui_verify_prompt(frame: &mut Frame, input: &str) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::White))
         .title(" Command ");
-    let input_text = Paragraph::new(Line::from(vec![
-        Span::styled(
-            input,
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("_", Style::default().fg(Color::Cyan)),
-    ]))
+    let text_style = Style::default()
+        .fg(Color::White)
+        .add_modifier(Modifier::BOLD);
+    let cursor_style = Style::default().fg(Color::Black).bg(Color::Cyan);
+    let input_text = Paragraph::new(Line::from(text_input_spans(
+        input,
+        text_style,
+        cursor_style,
+        true,
+    )))
     .block(input_block);
     frame.render_widget(input_text, chunks[1]);
 
     let hint = Paragraph::new(Line::from(vec![Span::styled(
-        "e.g. alacritty --working-directory {directory} -e cargo run  |  Enter: save & run  Esc: cancel",
-        Style::default().fg(Color::DarkGray),
-    )]));
-    frame.render_widget(hint, chunks[2]);
-}
-
-fn ui_editor_prompt(frame: &mut Frame, input: &str) {
-    let area = centered_rect(50, 20, frame.area());
-
-    frame.render_widget(Clear, area);
-
-    let outer_block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Green))
-        .title(" Set Editor Command ")
-        .title_style(
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Green)
-                .add_modifier(Modifier::BOLD),
-        )
-        .padding(Padding::new(1, 1, 1, 0));
-    let inner = outer_block.inner(area);
-    frame.render_widget(outer_block, area);
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1), // label
-            Constraint::Length(3), // input
-            Constraint::Min(1),    // hint
-        ])
-        .split(inner);
-
-    let label = Paragraph::new(Line::from(vec![Span::styled(
-        "No editor configured. Use {directory} for the worktree path:",
-        Style::default().fg(Color::White),
-    )]));
-    frame.render_widget(label, chunks[0]);
-
-    let input_block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::White))
-        .title(" Command ");
-    let input_text = Paragraph::new(Line::from(vec![
-        Span::styled(
-            input,
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("_", Style::default().fg(Color::Cyan)),
-    ]))
-    .block(input_block);
-    frame.render_widget(input_text, chunks[1]);
-
-    let hint = Paragraph::new(Line::from(vec![Span::styled(
-        "e.g. alacritty --working-directory {directory} -e nvim  |  Enter: save & open  Esc: cancel",
+        hint_text,
         Style::default().fg(Color::DarkGray),
     )]));
     frame.render_widget(hint, chunks[2]);
@@ -1181,15 +1180,16 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
             .borders(Borders::ALL)
             .border_style(verify_border)
             .title(" Command ");
-        let mut verify_spans = vec![Span::styled(
+        let text_style = Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD);
+        let cursor_style = Style::default().fg(Color::Black).bg(Color::Cyan);
+        let verify_spans = text_input_spans(
             &config_edit.verify_command,
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        )];
-        if verify_active {
-            verify_spans.push(Span::styled("_", Style::default().fg(Color::Cyan)));
-        }
+            text_style,
+            cursor_style,
+            verify_active,
+        );
         let verify_text = Paragraph::new(Line::from(verify_spans)).block(verify_block);
         frame.render_widget(verify_text, chunks[1]);
 
@@ -1217,29 +1217,21 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
             .borders(Borders::ALL)
             .border_style(editor_border)
             .title(" Command ");
-        let display_editor = if config_edit.editor_command.is_empty() {
-            DEFAULT_EDITOR_COMMAND.to_string()
+        let editor_spans = if config_edit.editor_command.is_empty() && !editor_active {
+            vec![Span::styled(
+                DEFAULT_EDITOR_COMMAND,
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD),
+            )]
         } else {
-            config_edit.editor_command.clone()
+            text_input_spans(
+                &config_edit.editor_command,
+                text_style,
+                cursor_style,
+                editor_active,
+            )
         };
-        let editor_display_color = if config_edit.editor_command.is_empty() && !editor_active {
-            Color::DarkGray
-        } else {
-            Color::White
-        };
-        let mut editor_spans = vec![Span::styled(
-            if config_edit.editor_command.is_empty() && editor_active {
-                ""
-            } else {
-                &display_editor
-            },
-            Style::default()
-                .fg(editor_display_color)
-                .add_modifier(Modifier::BOLD),
-        )];
-        if editor_active {
-            editor_spans.push(Span::styled("_", Style::default().fg(Color::Cyan)));
-        }
         let editor_text = Paragraph::new(Line::from(editor_spans)).block(editor_block);
         frame.render_widget(editor_text, chunks[4]);
 
@@ -1304,29 +1296,21 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
             .borders(Borders::ALL)
             .border_style(claude_border)
             .title(" Command ");
-        let display_cmd = if config_edit.claude_command.is_empty() {
-            DEFAULT_CLAUDE_COMMAND.to_string()
+        let claude_spans = if config_edit.claude_command.is_empty() && !claude_active {
+            vec![Span::styled(
+                DEFAULT_CLAUDE_COMMAND,
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD),
+            )]
         } else {
-            config_edit.claude_command.clone()
+            text_input_spans(
+                &config_edit.claude_command,
+                text_style,
+                cursor_style,
+                claude_active,
+            )
         };
-        let display_color = if config_edit.claude_command.is_empty() && !claude_active {
-            Color::DarkGray
-        } else {
-            Color::White
-        };
-        let mut claude_spans = vec![Span::styled(
-            if config_edit.claude_command.is_empty() && claude_active {
-                ""
-            } else {
-                &display_cmd
-            },
-            Style::default()
-                .fg(display_color)
-                .add_modifier(Modifier::BOLD),
-        )];
-        if claude_active {
-            claude_spans.push(Span::styled("_", Style::default().fg(Color::Cyan)));
-        }
         let claude_text = Paragraph::new(Line::from(claude_spans)).block(claude_block);
         frame.render_widget(claude_text, chunks[10]);
 

@@ -180,7 +180,7 @@ impl App {
             String::new()
         };
         self.repo_select = RepoSelectState::new();
-        self.repo_select.input = owner;
+        self.repo_select.input = crate::models::TextInput::from(owner);
         self.screen = Screen::RepoSelect;
     }
 }

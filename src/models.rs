@@ -113,11 +113,11 @@ pub struct ConfirmModal {
 #[derive(PartialEq)]
 pub enum Mode {
     Normal,
-    Filtering { query: String },
+    Filtering { query: TextInput },
     CreatingIssue,
     Confirming,
-    EditingVerifyCommand { input: String },
-    EditingEditorCommand { input: String },
+    EditingVerifyCommand { input: TextInput },
+    EditingEditorCommand { input: TextInput },
 }
 
 #[derive(PartialEq)]
@@ -129,10 +129,10 @@ pub enum Screen {
 }
 
 pub struct ConfigEditState {
-    pub verify_command: String,
-    pub editor_command: String,
+    pub verify_command: TextInput,
+    pub editor_command: TextInput,
     pub pr_ready: bool,
-    pub claude_command: String,
+    pub claude_command: TextInput,
     pub active_field: usize, // 0 = verify, 1 = editor, 2 = pr_ready, 3 = claude_command
 }
 
@@ -144,10 +144,10 @@ impl ConfigEditState {
         claude_command: String,
     ) -> Self {
         Self {
-            verify_command,
-            editor_command,
+            verify_command: TextInput::from(verify_command),
+            editor_command: TextInput::from(editor_command),
             pr_ready,
-            claude_command,
+            claude_command: TextInput::from(claude_command),
             active_field: 0,
         }
     }
@@ -161,25 +161,25 @@ pub enum RepoSelectPhase {
 }
 
 pub struct RepoSelectState {
-    pub input: String,
+    pub input: TextInput,
     pub repos: Vec<String>,
     pub filtered_repos: Vec<String>,
     pub selected: usize,
     pub phase: RepoSelectPhase,
     pub error: Option<String>,
-    pub filter_query: String,
+    pub filter_query: TextInput,
 }
 
 impl RepoSelectState {
     pub fn new() -> Self {
         Self {
-            input: String::new(),
+            input: TextInput::new(),
             repos: Vec::new(),
             filtered_repos: Vec::new(),
             selected: 0,
             phase: RepoSelectPhase::Typing,
             error: None,
-            filter_query: String::new(),
+            filter_query: TextInput::new(),
         }
     }
 
@@ -190,7 +190,7 @@ impl RepoSelectState {
             self.filtered_repos = self
                 .repos
                 .iter()
-                .filter(|r| fuzzy_match(&self.filter_query, r))
+                .filter(|r| fuzzy_match(self.filter_query.value(), r))
                 .cloned()
                 .collect();
         }
@@ -205,8 +205,8 @@ impl RepoSelectState {
 }
 
 pub struct IssueModal {
-    pub title: String,
-    pub body: String,
+    pub title: TextInput,
+    pub body: TextInput,
     pub active_field: usize, // 0 = title, 1 = body
     pub error: Option<String>,
     pub submitting: bool,
@@ -215,8 +215,8 @@ pub struct IssueModal {
 impl IssueModal {
     pub fn new() -> Self {
         Self {
-            title: String::new(),
-            body: String::new(),
+            title: TextInput::new(),
+            body: TextInput::new(),
             active_field: 0,
             error: None,
             submitting: false,
@@ -245,6 +245,93 @@ pub fn fuzzy_match(query: &str, target: &str) -> bool {
         }
     }
     true
+}
+
+#[derive(PartialEq)]
+pub struct TextInput {
+    pub text: String,
+    pub cursor: usize, // character index (not byte index)
+}
+
+impl TextInput {
+    pub fn new() -> Self {
+        Self {
+            text: String::new(),
+            cursor: 0,
+        }
+    }
+
+    pub fn from(s: String) -> Self {
+        let cursor = s.chars().count();
+        Self { text: s, cursor }
+    }
+
+    fn byte_index(&self) -> usize {
+        self.text
+            .char_indices()
+            .nth(self.cursor)
+            .map(|(i, _)| i)
+            .unwrap_or(self.text.len())
+    }
+
+    pub fn insert(&mut self, c: char) {
+        let idx = self.byte_index();
+        self.text.insert(idx, c);
+        self.cursor += 1;
+    }
+
+    pub fn delete_back(&mut self) {
+        if self.cursor > 0 {
+            self.cursor -= 1;
+            let idx = self.byte_index();
+            self.text.remove(idx);
+        }
+    }
+
+    pub fn move_left(&mut self) {
+        if self.cursor > 0 {
+            self.cursor -= 1;
+        }
+    }
+
+    pub fn move_right(&mut self) {
+        if self.cursor < self.text.chars().count() {
+            self.cursor += 1;
+        }
+    }
+
+    pub fn move_home(&mut self) {
+        self.cursor = 0;
+    }
+
+    pub fn move_end(&mut self) {
+        self.cursor = self.text.chars().count();
+    }
+
+    pub fn value(&self) -> &str {
+        &self.text
+    }
+
+    /// Text before the cursor position
+    pub fn before_cursor(&self) -> &str {
+        let idx = self.byte_index();
+        &self.text[..idx]
+    }
+
+    /// Text from cursor position onward
+    pub fn after_cursor(&self) -> &str {
+        let idx = self.byte_index();
+        &self.text[idx..]
+    }
+
+    pub fn clear(&mut self) {
+        self.text.clear();
+        self.cursor = 0;
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.text.is_empty()
+    }
 }
 
 pub fn card_matches(card: &Card, query: &str) -> bool {
