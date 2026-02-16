@@ -403,6 +403,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "octopai"
+version = "0.1.0"
+dependencies = [
+ "color-eyre",
+ "crossterm",
+ "dirs",
+ "ratatui",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -512,18 +524,6 @@ dependencies = [
  "getrandom",
  "libredox",
  "thiserror",
-]
-
-[[package]]
-name = "roctopai"
-version = "0.1.0"
-dependencies = [
- "color-eyre",
- "crossterm",
- "dirs",
- "ratatui",
- "serde",
- "serde_json",
 ]
 
 [[package]]
