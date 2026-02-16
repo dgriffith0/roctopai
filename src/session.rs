@@ -123,6 +123,18 @@ pub const TEMPLATE_FIELDS: &[(&str, &str)] = &[
     ("{worktree_path}", "Path to the git worktree"),
 ];
 
+/// Default editor command template. Users can override this entirely.
+pub const DEFAULT_EDITOR_COMMAND: &str = "alacritty --working-directory {directory} -e nvim";
+
+/// Available template fields for editor and verify command configuration.
+pub const EDITOR_TEMPLATE_FIELDS: &[(&str, &str)] =
+    &[("{directory}", "Path to the worktree directory")];
+
+/// Expand template fields in an editor or verify command string.
+pub fn expand_editor_command(template: &str, directory: &str) -> String {
+    template.replace("{directory}", directory)
+}
+
 /// Expand template fields in a command string.
 #[allow(clippy::too_many_arguments)]
 fn expand_template(

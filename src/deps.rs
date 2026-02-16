@@ -26,12 +26,6 @@ pub fn check_dependencies() -> Vec<Dependency> {
             "Used by hook script for socket communication",
             true,
         ),
-        check_dep(
-            "alacritty",
-            "alacritty",
-            "Terminal emulator for cargo run (optional)",
-            false,
-        ),
     ]
 }
 

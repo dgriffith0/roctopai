@@ -36,7 +36,9 @@ use models::{
     ConfigEditState, ConfirmAction, ConfirmModal, IssueModal, IssueSubmitResult, MergeStrategy,
     Mode, RepoSelectPhase, Screen, SessionStates, REFRESH_INTERVAL, SOCKET_PATH,
 };
-use session::{attach_tmux_session, create_worktree_and_session, fetch_sessions};
+use session::{
+    attach_tmux_session, create_worktree_and_session, expand_editor_command, fetch_sessions,
+};
 use ui::{ui, ui_configuration, ui_dependencies, ui_repo_select};
 
 fn main() -> Result<()> {
@@ -510,32 +512,22 @@ fn main() -> Result<()> {
                                     if let Some(card) = app.worktrees.get(app.selected_card[1]) {
                                         let worktree_path = card.description.clone();
                                         if let Some(cmd) = get_verify_command(&app.repo) {
-                                            // Split command into program and args
-                                            let parts: Vec<&str> = cmd.split_whitespace().collect();
-                                            if let Some((program, args)) = parts.split_first() {
-                                                let mut alacritty_args = vec![
-                                                    "--working-directory",
-                                                    &worktree_path,
-                                                    "-e",
-                                                ];
-                                                alacritty_args.push(program);
-                                                alacritty_args.extend(args);
-                                                let result = Command::new("alacritty")
-                                                    .args(&alacritty_args)
-                                                    .spawn();
-                                                match result {
-                                                    Ok(_) => {
-                                                        app.status_message = Some(format!(
-                                                            "Launched '{}' in Alacritty for '{}'",
-                                                            cmd, card.title
-                                                        ));
-                                                    }
-                                                    Err(e) => {
-                                                        app.status_message = Some(format!(
-                                                            "Failed to launch Alacritty: {}",
-                                                            e
-                                                        ));
-                                                    }
+                                            let expanded =
+                                                expand_editor_command(&cmd, &worktree_path);
+                                            let result =
+                                                Command::new("sh").args(["-c", &expanded]).spawn();
+                                            match result {
+                                                Ok(_) => {
+                                                    app.status_message = Some(format!(
+                                                        "Launched verify for '{}'",
+                                                        card.title
+                                                    ));
+                                                }
+                                                Err(e) => {
+                                                    app.status_message = Some(format!(
+                                                        "Failed to launch verify command: {}",
+                                                        e
+                                                    ));
                                                 }
                                             }
                                         } else {
@@ -550,31 +542,22 @@ fn main() -> Result<()> {
                                     if let Some(card) = app.worktrees.get(app.selected_card[1]) {
                                         let worktree_path = card.description.clone();
                                         if let Some(cmd) = get_editor_command(&app.repo) {
-                                            let parts: Vec<&str> = cmd.split_whitespace().collect();
-                                            if let Some((program, args)) = parts.split_first() {
-                                                let mut alacritty_args = vec![
-                                                    "--working-directory",
-                                                    &worktree_path,
-                                                    "-e",
-                                                ];
-                                                alacritty_args.push(program);
-                                                alacritty_args.extend(args);
-                                                let result = Command::new("alacritty")
-                                                    .args(&alacritty_args)
-                                                    .spawn();
-                                                match result {
-                                                    Ok(_) => {
-                                                        app.status_message = Some(format!(
-                                                            "Opened '{}' in '{}'",
-                                                            card.title, cmd
-                                                        ));
-                                                    }
-                                                    Err(e) => {
-                                                        app.status_message = Some(format!(
-                                                            "Failed to launch editor: {}",
-                                                            e
-                                                        ));
-                                                    }
+                                            let expanded =
+                                                expand_editor_command(&cmd, &worktree_path);
+                                            let result =
+                                                Command::new("sh").args(["-c", &expanded]).spawn();
+                                            match result {
+                                                Ok(_) => {
+                                                    app.status_message = Some(format!(
+                                                        "Opened editor for '{}'",
+                                                        card.title
+                                                    ));
+                                                }
+                                                Err(e) => {
+                                                    app.status_message = Some(format!(
+                                                        "Failed to launch editor: {}",
+                                                        e
+                                                    ));
                                                 }
                                             }
                                         } else {
@@ -1076,16 +1059,8 @@ fn main() -> Result<()> {
                                     // Now execute the verify command
                                     if let Some(card) = app.worktrees.get(app.selected_card[1]) {
                                         let worktree_path = card.description.clone();
-                                        let parts: Vec<&str> = cmd.split_whitespace().collect();
-                                        if let Some((program, args)) = parts.split_first() {
-                                            let mut alacritty_args =
-                                                vec!["--working-directory", &worktree_path, "-e"];
-                                            alacritty_args.push(program);
-                                            alacritty_args.extend(args);
-                                            let _ = Command::new("alacritty")
-                                                .args(&alacritty_args)
-                                                .spawn();
-                                        }
+                                        let expanded = expand_editor_command(&cmd, &worktree_path);
+                                        let _ = Command::new("sh").args(["-c", &expanded]).spawn();
                                     }
                                 }
                                 app.mode = Mode::Normal;
@@ -1113,16 +1088,8 @@ fn main() -> Result<()> {
                                     // Now launch the editor
                                     if let Some(card) = app.worktrees.get(app.selected_card[1]) {
                                         let worktree_path = card.description.clone();
-                                        let parts: Vec<&str> = cmd.split_whitespace().collect();
-                                        if let Some((program, args)) = parts.split_first() {
-                                            let mut alacritty_args =
-                                                vec!["--working-directory", &worktree_path, "-e"];
-                                            alacritty_args.push(program);
-                                            alacritty_args.extend(args);
-                                            let _ = Command::new("alacritty")
-                                                .args(&alacritty_args)
-                                                .spawn();
-                                        }
+                                        let expanded = expand_editor_command(&cmd, &worktree_path);
+                                        let _ = Command::new("sh").args(["-c", &expanded]).spawn();
                                     }
                                 }
                                 app.mode = Mode::Normal;

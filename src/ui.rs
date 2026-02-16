@@ -16,7 +16,9 @@ use crate::models::{
     card_matches, Card, ConfirmModal, IssueModal, Mode, RepoSelectPhase, RepoSelectState,
     REFRESH_INTERVAL,
 };
-use crate::session::{DEFAULT_CLAUDE_COMMAND, TEMPLATE_FIELDS};
+use crate::session::{
+    DEFAULT_CLAUDE_COMMAND, DEFAULT_EDITOR_COMMAND, EDITOR_TEMPLATE_FIELDS, TEMPLATE_FIELDS,
+};
 
 pub fn ui_repo_select(frame: &mut Frame, state: &RepoSelectState) {
     let area = frame.area();
@@ -1010,7 +1012,7 @@ fn ui_verify_prompt(frame: &mut Frame, input: &str) {
         .split(inner);
 
     let label = Paragraph::new(Line::from(vec![Span::styled(
-        "No verify command configured for this repo. Enter a command:",
+        "No verify command configured. Use {directory} for the worktree path:",
         Style::default().fg(Color::White),
     )]));
     frame.render_widget(label, chunks[0]);
@@ -1032,7 +1034,7 @@ fn ui_verify_prompt(frame: &mut Frame, input: &str) {
     frame.render_widget(input_text, chunks[1]);
 
     let hint = Paragraph::new(Line::from(vec![Span::styled(
-        "e.g. cargo run, npm start, make run  |  Enter: save & run  Esc: cancel",
+        "e.g. alacritty --working-directory {directory} -e cargo run  |  Enter: save & run  Esc: cancel",
         Style::default().fg(Color::DarkGray),
     )]));
     frame.render_widget(hint, chunks[2]);
@@ -1067,7 +1069,7 @@ fn ui_editor_prompt(frame: &mut Frame, input: &str) {
         .split(inner);
 
     let label = Paragraph::new(Line::from(vec![Span::styled(
-        "No editor configured for this repo. Enter a command:",
+        "No editor configured. Use {directory} for the worktree path:",
         Style::default().fg(Color::White),
     )]));
     frame.render_widget(label, chunks[0]);
@@ -1089,7 +1091,7 @@ fn ui_editor_prompt(frame: &mut Frame, input: &str) {
     frame.render_widget(input_text, chunks[1]);
 
     let hint = Paragraph::new(Line::from(vec![Span::styled(
-        "e.g. nvim, code, vim, hx  |  Enter: save & open  Esc: cancel",
+        "e.g. alacritty --working-directory {directory} -e nvim  |  Enter: save & open  Esc: cancel",
         Style::default().fg(Color::DarkGray),
     )]));
     frame.render_widget(hint, chunks[2]);
@@ -1215,10 +1217,24 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
             .borders(Borders::ALL)
             .border_style(editor_border)
             .title(" Command ");
+        let display_editor = if config_edit.editor_command.is_empty() {
+            DEFAULT_EDITOR_COMMAND.to_string()
+        } else {
+            config_edit.editor_command.clone()
+        };
+        let editor_display_color = if config_edit.editor_command.is_empty() && !editor_active {
+            Color::DarkGray
+        } else {
+            Color::White
+        };
         let mut editor_spans = vec![Span::styled(
-            &config_edit.editor_command,
+            if config_edit.editor_command.is_empty() && editor_active {
+                ""
+            } else {
+                &display_editor
+            },
             Style::default()
-                .fg(Color::White)
+                .fg(editor_display_color)
                 .add_modifier(Modifier::BOLD),
         )];
         if editor_active {
@@ -1324,15 +1340,29 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
         frame.render_widget(fields_header, chunks[12]);
 
         // Template fields list + config path in the remaining space
-        let mut lines: Vec<Line> = TEMPLATE_FIELDS
-            .iter()
-            .map(|(field, desc)| {
-                Line::from(vec![
-                    Span::styled(format!("  {} ", field), Style::default().fg(Color::Cyan)),
-                    Span::styled(format!("- {}", desc), Style::default().fg(Color::DarkGray)),
-                ])
-            })
-            .collect();
+        let mut lines: Vec<Line> = Vec::new();
+        // Editor/Verify template fields
+        lines.push(Line::from(vec![Span::styled(
+            "  Editor & Verify commands:",
+            Style::default().fg(Color::Gray),
+        )]));
+        for (field, desc) in EDITOR_TEMPLATE_FIELDS {
+            lines.push(Line::from(vec![
+                Span::styled(format!("    {} ", field), Style::default().fg(Color::Cyan)),
+                Span::styled(format!("- {}", desc), Style::default().fg(Color::DarkGray)),
+            ]));
+        }
+        // Claude template fields
+        lines.push(Line::from(vec![Span::styled(
+            "  Claude command:",
+            Style::default().fg(Color::Gray),
+        )]));
+        for (field, desc) in TEMPLATE_FIELDS {
+            lines.push(Line::from(vec![
+                Span::styled(format!("    {} ", field), Style::default().fg(Color::Cyan)),
+                Span::styled(format!("- {}", desc), Style::default().fg(Color::DarkGray)),
+            ]));
+        }
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
             Span::styled("Config file: ", Style::default().fg(Color::DarkGray)),
