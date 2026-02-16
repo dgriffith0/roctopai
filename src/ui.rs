@@ -529,7 +529,7 @@ pub fn ui(frame: &mut Frame, app: &App) {
         match app.active_section {
             0 => {
                 area_spans.push(Span::styled(" w ", key_accent));
-                area_spans.push(Span::styled(" Worktree+Claude ", desc_style));
+                area_spans.push(Span::styled(" Worktree+Session ", desc_style));
                 area_spans.push(Span::styled(" d ", key_style));
                 area_spans.push(Span::styled(" Close issue ", desc_style));
                 area_spans.push(Span::styled(" s ", key_style));
