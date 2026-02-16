@@ -134,8 +134,8 @@ pub struct ConfigEditState {
     pub verify_command: TextInput,
     pub editor_command: TextInput,
     pub pr_ready: bool,
-    pub claude_command: TextInput,
-    pub active_field: usize, // 0 = verify, 1 = editor, 2 = pr_ready, 3 = claude_command
+    pub session_command: TextInput,
+    pub active_field: usize, // 0 = verify, 1 = editor, 2 = pr_ready, 3 = session_command
 }
 
 impl ConfigEditState {
@@ -143,13 +143,13 @@ impl ConfigEditState {
         verify_command: String,
         editor_command: String,
         pr_ready: bool,
-        claude_command: String,
+        session_command: String,
     ) -> Self {
         Self {
             verify_command: TextInput::from(verify_command),
             editor_command: TextInput::from(editor_command),
             pr_ready,
-            claude_command: TextInput::from(claude_command),
+            session_command: TextInput::from(session_command),
             active_field: 0,
         }
     }

@@ -18,7 +18,7 @@ use crate::models::{
 };
 use crate::session::{
     COMMAND_SHORTCUTS, DEFAULT_CLAUDE_COMMAND, DEFAULT_EDITOR_COMMAND, EDITOR_TEMPLATE_FIELDS,
-    TEMPLATE_FIELDS,
+    SESSION_SHORTCUTS, TEMPLATE_FIELDS,
 };
 
 /// Build spans for a TextInput showing the cursor at the correct position.
@@ -1240,8 +1240,8 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
                 Constraint::Length(1), // pr ready label
                 Constraint::Length(1), // pr ready toggle
                 Constraint::Length(1), // spacing
-                Constraint::Length(1), // claude command label
-                Constraint::Length(3), // claude command input
+                Constraint::Length(1), // session command label
+                Constraint::Length(3), // session command input
                 Constraint::Length(1), // spacing
                 Constraint::Length(1), // template fields header
                 Constraint::Min(0),    // template fields list + config path
@@ -1251,7 +1251,7 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
         let verify_active = config_edit.active_field == 0;
         let editor_active = config_edit.active_field == 1;
         let pr_ready_active = config_edit.active_field == 2;
-        let claude_active = config_edit.active_field == 3;
+        let session_active = config_edit.active_field == 3;
 
         // Verify command field
         let verify_label = Paragraph::new(Line::from(vec![Span::styled(
@@ -1369,31 +1369,31 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
         ]));
         frame.render_widget(pr_ready_text, chunks[7]);
 
-        // Claude command field
-        let claude_label = Paragraph::new(Line::from(vec![Span::styled(
-            "Claude Command",
+        // Session command field
+        let session_label = Paragraph::new(Line::from(vec![Span::styled(
+            "Session Command",
             Style::default()
-                .fg(if claude_active {
+                .fg(if session_active {
                     Color::Cyan
                 } else {
                     Color::Gray
                 })
                 .add_modifier(Modifier::BOLD),
         )]));
-        frame.render_widget(claude_label, chunks[9]);
+        frame.render_widget(session_label, chunks[9]);
 
-        let claude_border = if claude_active {
+        let session_border = if session_active {
             Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::DarkGray)
         };
-        let claude_block = Block::default()
+        let session_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(claude_border)
+            .border_style(session_border)
             .title(" Command ");
-        let claude_spans = if config_edit.claude_command.is_empty() && !claude_active {
+        let session_spans = if config_edit.session_command.is_empty() && !session_active {
             vec![Span::styled(
                 DEFAULT_CLAUDE_COMMAND,
                 Style::default()
@@ -1402,14 +1402,14 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
             )]
         } else {
             text_input_spans(
-                &config_edit.claude_command,
+                &config_edit.session_command,
                 text_style,
                 cursor_style,
-                claude_active,
+                session_active,
             )
         };
-        let claude_text = Paragraph::new(Line::from(claude_spans)).block(claude_block);
-        frame.render_widget(claude_text, chunks[10]);
+        let session_text = Paragraph::new(Line::from(session_spans)).block(session_block);
+        frame.render_widget(session_text, chunks[10]);
 
         // Template fields header
         let fields_header = Paragraph::new(Line::from(vec![Span::styled(
@@ -1451,9 +1451,27 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
                 ),
             ]));
         }
-        // Claude template fields
+        // Session command shortcuts
         lines.push(Line::from(vec![Span::styled(
-            "  Claude command:",
+            "  Session command shortcuts:",
+            Style::default().fg(Color::Gray),
+        )]));
+        for (shortcut, expansion, desc) in SESSION_SHORTCUTS {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("    {} ", shortcut),
+                    Style::default().fg(Color::Cyan),
+                ),
+                Span::styled(format!("- {} ", desc), Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("({})", expansion),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]));
+        }
+        // Session template fields
+        lines.push(Line::from(vec![Span::styled(
+            "  Session command fields:",
             Style::default().fg(Color::Gray),
         )]));
         for (field, desc) in TEMPLATE_FIELDS {

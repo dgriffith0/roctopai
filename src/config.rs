@@ -14,8 +14,8 @@ pub struct Config {
     pub editor_commands: HashMap<String, String>,
     #[serde(default)]
     pub pr_ready: HashMap<String, bool>,
-    #[serde(default)]
-    pub claude_commands: HashMap<String, String>,
+    #[serde(default, alias = "claude_commands")]
+    pub session_commands: HashMap<String, String>,
 }
 
 pub fn config_path() -> PathBuf {
@@ -50,16 +50,16 @@ pub fn save_config(repo: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let claude_commands = existing
+    let session_commands = existing
         .as_ref()
-        .map(|c| c.claude_commands.clone())
+        .map(|c| c.session_commands.clone())
         .unwrap_or_default();
     let config = Config {
         repo: repo.to_string(),
         verify_commands,
         editor_commands,
         pr_ready,
-        claude_commands,
+        session_commands,
     };
     fs::write(path, serde_json::to_string_pretty(&config)?)?;
     Ok(())
@@ -90,7 +90,7 @@ pub fn set_editor_command(repo: &str, command: &str) -> Result<()> {
         verify_commands: HashMap::new(),
         editor_commands: HashMap::new(),
         pr_ready: HashMap::new(),
-        claude_commands: HashMap::new(),
+        session_commands: HashMap::new(),
     });
     config
         .editor_commands
@@ -104,7 +104,7 @@ pub fn set_verify_command(repo: &str, command: &str) -> Result<()> {
         verify_commands: HashMap::new(),
         editor_commands: HashMap::new(),
         pr_ready: HashMap::new(),
-        claude_commands: HashMap::new(),
+        session_commands: HashMap::new(),
     });
     config
         .verify_commands
@@ -118,7 +118,7 @@ pub fn get_pr_ready(repo: &str) -> bool {
         .unwrap_or(false)
 }
 
-pub fn get_claude_command(repo: &str) -> Option<String> {
+pub fn get_session_command(repo: &str) -> Option<String> {
     let config = load_config()?;
-    config.claude_commands.get(repo).cloned()
+    config.session_commands.get(repo).cloned()
 }

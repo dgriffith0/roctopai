@@ -9,24 +9,41 @@ pub struct Dependency {
 }
 
 pub fn check_dependencies() -> Vec<Dependency> {
-    vec![
+    let mut deps = vec![
         check_dep("gh", "gh", "GitHub CLI for issue/PR management", true),
         check_dep("git", "git", "Version control with worktree support", true),
         check_dep("tmux", "tmux", "Terminal multiplexer for sessions", true),
         check_dep("nvim", "nvim", "Editor launched in worktree sessions", true),
-        check_dep(
-            "claude",
-            "claude",
-            "Claude Code CLI for autonomous work",
-            true,
-        ),
-        check_dep(
-            "python3",
-            "python3",
-            "Used by hook script for socket communication",
-            true,
-        ),
-    ]
+    ];
+
+    // Require at least one AI coding assistant (claude or cursor)
+    let claude = check_dep(
+        "claude",
+        "claude",
+        "Claude Code CLI for autonomous work",
+        false,
+    );
+    let cursor = check_dep("cursor", "cursor", "Cursor CLI for autonomous work", false);
+    let either_available = claude.available || cursor.available;
+    deps.push(Dependency {
+        name: "claude/cursor",
+        description: "AI coding assistant (Claude Code or Cursor)",
+        required: true,
+        available: either_available,
+        version: if claude.available {
+            claude.version
+        } else {
+            cursor.version
+        },
+    });
+
+    deps.push(check_dep(
+        "python3",
+        "python3",
+        "Used by hook script for socket communication",
+        true,
+    ));
+    deps
 }
 
 fn check_dep(

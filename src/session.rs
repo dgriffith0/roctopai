@@ -69,7 +69,7 @@ pub fn fetch_sessions(socket_states: &SessionStates) -> Vec<Card> {
             };
 
             let (tag, tag_color, description) = match claude_state {
-                "processing" => ("processing", Color::Cyan, "Claude is thinking..."),
+                "processing" => ("processing", Color::Cyan, "Processing..."),
                 "working" => ("working", Color::Green, "Using tools..."),
                 "permission" => ("permission", Color::Yellow, "Awaiting permission"),
                 "idle" => ("idle", Color::DarkGray, "Waiting for prompt"),
@@ -107,11 +107,15 @@ pub fn attach_tmux_session(session: &str) -> std::result::Result<(), String> {
     Ok(())
 }
 
-/// Default command template used when no custom claude command is configured.
+/// Default command template for Claude Code sessions.
 pub const DEFAULT_CLAUDE_COMMAND: &str =
     "claude \"$(cat '{prompt_file}')\" --allowedTools Read,Edit,Bash";
 
-/// Available template fields for the claude command configuration.
+/// Default command template for Cursor sessions.
+pub const DEFAULT_CURSOR_COMMAND: &str =
+    "cursor \"$(cat '{prompt_file}')\" --allowedTools Read,Edit,Bash";
+
+/// Available template fields for the session command configuration.
 /// Each tuple is (field_name, description).
 pub const TEMPLATE_FIELDS: &[(&str, &str)] = &[
     (
@@ -132,6 +136,22 @@ pub const DEFAULT_EDITOR_COMMAND: &str = "{alacritty} nvim";
 /// Available template fields for editor and verify command configuration.
 pub const EDITOR_TEMPLATE_FIELDS: &[(&str, &str)] =
     &[("{directory}", "Path to the worktree directory")];
+
+/// Shortcut templates for session commands that expand to full AI assistant commands.
+/// Each shortcut expands to include `{prompt_file}` which is then resolved
+/// during template expansion.
+pub const SESSION_SHORTCUTS: &[(&str, &str, &str)] = &[
+    (
+        "{claude}",
+        DEFAULT_CLAUDE_COMMAND,
+        "Claude Code CLI with prompt file",
+    ),
+    (
+        "{cursor}",
+        DEFAULT_CURSOR_COMMAND,
+        "Cursor CLI with prompt file",
+    ),
+];
 
 /// Shortcut templates that expand to common terminal emulator prefixes.
 /// Each shortcut expands to include `{directory}` which is then resolved
@@ -172,6 +192,8 @@ pub fn expand_editor_command(template: &str, directory: &str) -> String {
 }
 
 /// Expand template fields in a command string.
+/// Session shortcuts (e.g. `{claude}`, `{cursor}`) are expanded first,
+/// then all other template fields are resolved.
 #[allow(clippy::too_many_arguments)]
 fn expand_template(
     template: &str,
@@ -183,7 +205,12 @@ fn expand_template(
     branch: &str,
     worktree_path: &str,
 ) -> String {
-    template
+    // Expand session shortcuts first (e.g. {claude} -> full claude command)
+    let mut expanded = template.to_string();
+    for (shortcut, expansion, _) in SESSION_SHORTCUTS {
+        expanded = expanded.replace(shortcut, expansion);
+    }
+    expanded
         .replace("{prompt_file}", prompt_file)
         .replace("{issue_number}", &number.to_string())
         .replace("{repo}", repo)
@@ -200,7 +227,7 @@ pub fn create_worktree_and_session(
     body: &str,
     hook_script: Option<&str>,
     pr_ready: bool,
-    claude_command: Option<&str>,
+    session_command: Option<&str>,
 ) -> std::result::Result<(), String> {
     let repo_name = get_repo_name(repo);
     let branch = format!("issue-{}", number);
@@ -275,8 +302,8 @@ pub fn create_worktree_and_session(
     let prompt_file = format!("/tmp/roctopai-prompt-{}.txt", number);
     fs::write(&prompt_file, &prompt).map_err(|e| format!("Failed to write prompt file: {}", e))?;
 
-    // Send Claude command to the single pane
-    let template = claude_command.unwrap_or(DEFAULT_CLAUDE_COMMAND);
+    // Send session command to the single pane
+    let template = session_command.unwrap_or(DEFAULT_CLAUDE_COMMAND);
     let shell_cmd = expand_template(
         template,
         &prompt_file,
