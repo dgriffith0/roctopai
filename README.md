@@ -28,7 +28,6 @@ Octopai checks for these on startup and will tell you what's missing.
 |---|---|
 | [gh](https://cli.github.com/) | All GitHub operations — fetching issues, creating PRs, merging, etc. |
 | [git](https://git-scm.com/) | Worktree creation and branch management |
-| [tmux](https://github.com/tmux/tmux) **(preferred)** or [GNU Screen](https://www.gnu.org/software/screen/) | Each AI session runs in its own multiplexer window so octopai can monitor and attach to it |
 | [python3](https://www.python.org/) | Runs the hook script that reports session status back to the board via Unix socket |
 | [claude](https://docs.anthropic.com/en/docs/claude-code) **or** [cursor](https://www.cursor.com/) | AI coding assistant — at least one is required |
 
@@ -96,9 +95,11 @@ Pressing `w` on an issue (or `n` to create a new one) creates a git worktree at 
 
 Octopai supports both **tmux** and **GNU Screen** as session multiplexers. You can toggle between them by pressing `C` to open the configuration page. At least one must be installed; if both are available, octopai defaults to tmux.
 
-### Why tmux is preferred
+### Multiplexer
 
-While GNU Screen works as a fallback, tmux provides a better experience with octopai:
+A terminal multiplexer lets you run multiple terminal sessions inside a single window and detach or reattach to them at will. Octopai uses one to give each AI session its own isolated terminal that it can monitor and attach to from the board.
+
+[GNU Screen](https://www.gnu.org/software/screen/) comes pre-installed on most Unix systems, so it works out of the box. However, [tmux](https://github.com/tmux/tmux) is the preferred multiplexer for octopai:
 
 - **Pane capture** — tmux's `capture-pane` reads pane content directly from its internal buffer, which is faster and more reliable than Screen's `hardcopy` approach of writing to a temporary file
 - **Scripting interface** — tmux commands return structured, predictable output that's easier to parse for session listing and state detection
