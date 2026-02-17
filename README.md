@@ -12,7 +12,7 @@
 
 Turning a GitHub issue into a working pull request involves a lot of manual steps: creating a branch, setting up a worktree, launching an AI assistant with the right context, monitoring progress, and managing the resulting PR. Octopai collapses all of that into a single kanban board in your terminal.
 
-- **One keypress to go from issue to AI session** — press `w` on any issue and octopai creates a worktree, opens a tmux session, and drops Claude or Cursor in with the full issue context
+- **One keypress to go from issue to AI session** — press `w` on any issue and octopai creates a worktree, opens a terminal session, and drops Claude or Cursor in with the full issue context
 - **Everything in one view** — issues, worktrees, sessions, and pull requests shown side by side
 - **Real-time status** — see whether your AI assistant is working, idle, or waiting for permission
 - **Full lifecycle management** — create issues, review PRs, merge, revert, and clean up worktrees
@@ -28,7 +28,7 @@ Octopai checks for these on startup and will tell you what's missing.
 |---|---|
 | [gh](https://cli.github.com/) | All GitHub operations — fetching issues, creating PRs, merging, etc. |
 | [git](https://git-scm.com/) | Worktree creation and branch management |
-| [tmux](https://github.com/tmux/tmux) | Each AI session runs in its own tmux window so octopai can monitor and attach to it |
+| [tmux](https://github.com/tmux/tmux) **(preferred)** or [GNU Screen](https://www.gnu.org/software/screen/) | Each AI session runs in its own multiplexer window so octopai can monitor and attach to it |
 | [python3](https://www.python.org/) | Runs the hook script that reports session status back to the board via Unix socket |
 | [claude](https://docs.anthropic.com/en/docs/claude-code) **or** [cursor](https://www.cursor.com/) | AI coding assistant — at least one is required |
 
@@ -92,7 +92,18 @@ Four columns: **Issues**, **Worktrees**, **Sessions**, and **Pull Requests**. Us
 
 ## Worktree + AI session
 
-Pressing `w` on an issue (or `n` to create a new one) creates a git worktree at `../<repo>-issue-<number>`, opens a tmux session with Claude or Cursor, and feeds the issue context as a prompt. A hook script reports status back to the board via Unix socket.
+Pressing `w` on an issue (or `n` to create a new one) creates a git worktree at `../<repo>-issue-<number>`, opens a multiplexer session with Claude or Cursor, and feeds the issue context as a prompt. A hook script reports status back to the board via Unix socket.
+
+Octopai supports both **tmux** and **GNU Screen** as session multiplexers. You can toggle between them by pressing `C` to open the configuration page. At least one must be installed; if both are available, octopai defaults to tmux.
+
+### Why tmux is preferred
+
+While GNU Screen works as a fallback, tmux provides a better experience with octopai:
+
+- **Pane capture** — tmux's `capture-pane` reads pane content directly from its internal buffer, which is faster and more reliable than Screen's `hardcopy` approach of writing to a temporary file
+- **Scripting interface** — tmux commands return structured, predictable output that's easier to parse for session listing and state detection
+- **Active maintenance** — tmux is actively developed with regular releases, while GNU Screen sees infrequent updates
+- **Working directory support** — tmux's `-c` flag sets the starting directory natively when creating sessions, avoiding extra shell commands
 
 Press `C` to configure per-repo session commands. Templates support: `{prompt_file}`, `{issue_number}`, `{repo}`, `{title}`, `{body}`, `{branch}`, `{worktree_path}`, `{claude}`, `{cursor}`.
 
