@@ -14,26 +14,19 @@ pub fn check_dependencies() -> Vec<Dependency> {
         check_dep("git", "git", "Version control with worktree support", true),
     ];
 
-    // Require at least one terminal multiplexer (tmux or screen)
-    let tmux = check_dep("tmux", "tmux", "Terminal multiplexer for sessions", false);
-    let screen = check_dep(
-        "screen",
-        "screen",
-        "Terminal multiplexer for sessions",
+    // Terminal multiplexers are optional; tmux is preferred
+    deps.push(check_dep(
+        "tmux",
+        "tmux",
+        "Preferred terminal multiplexer for sessions",
         false,
-    );
-    let mux_available = tmux.available || screen.available;
-    deps.push(Dependency {
-        name: "tmux/screen",
-        description: "Terminal multiplexer for sessions (tmux or GNU Screen)",
-        required: true,
-        available: mux_available,
-        version: if tmux.available {
-            tmux.version
-        } else {
-            screen.version
-        },
-    });
+    ));
+    deps.push(check_dep(
+        "screen",
+        "screen",
+        "Alternative terminal multiplexer (GNU Screen)",
+        false,
+    ));
 
     // Require at least one AI coding assistant (claude or cursor)
     let claude = check_dep(
