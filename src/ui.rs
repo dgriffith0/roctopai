@@ -452,19 +452,23 @@ pub fn ui(frame: &mut Frame, app: &App) {
         .split(outer[1]);
 
     let issue_title = format!(
-        " Issues [{}|{}] ",
+        " Issues ({}) [{}|{}] ",
+        app.issues.len(),
         app.issue_state_filter.label(),
         app.issue_assignee_filter.label()
     );
     let pr_title = format!(
-        " Pull Requests [{}|{}] ",
+        " Pull Requests ({}) [{}|{}] ",
+        app.pull_requests.len(),
         app.pr_state_filter.label(),
         app.pr_assignee_filter.label()
     );
+    let worktree_title = format!(" Worktrees ({}) ", app.worktrees.len());
+    let session_title = format!(" Sessions ({}) ", app.sessions.len());
     let section_data: [(&str, Color, &[Card]); 4] = [
         (&issue_title, Color::Red, &app.issues),
-        (" Worktrees ", Color::Yellow, &app.worktrees),
-        (" Sessions ", Color::Blue, &app.sessions),
+        (&worktree_title, Color::Yellow, &app.worktrees),
+        (&session_title, Color::Blue, &app.sessions),
         (&pr_title, Color::Magenta, &app.pull_requests),
     ];
 
@@ -981,6 +985,7 @@ fn render_message_center(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(paragraph, inner);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_column(
     frame: &mut Frame,
     area: Rect,
@@ -1016,7 +1021,7 @@ fn render_column(
     frame.render_widget(col_block, area);
 
     // Determine content area — if filtering, reserve a line for the search input
-    let (cards_area, filter_area) = if let Some(_) = filter_query {
+    let (cards_area, filter_area) = if filter_query.is_some() {
         let split = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(1), Constraint::Min(0)])
@@ -1025,21 +1030,6 @@ fn render_column(
     } else {
         (inner, None)
     };
-
-    // Render filter input if active
-    if let (Some(area), Some(query)) = (filter_area, filter_query) {
-        let input = Paragraph::new(Line::from(vec![
-            Span::styled("/ ", Style::default().fg(Color::Cyan)),
-            Span::styled(
-                query,
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("_", Style::default().fg(Color::Cyan)),
-        ]));
-        frame.render_widget(input, area);
-    }
 
     // Filter cards
     let visible_cards: Vec<&Card> = if let Some(query) = filter_query {
@@ -1051,6 +1041,23 @@ fn render_column(
     } else {
         cards.iter().collect()
     };
+
+    // Render filter input if active
+    if let (Some(area), Some(query)) = (filter_area, filter_query) {
+        let count_text = format!(" {}/{}", visible_cards.len(), cards.len());
+        let input = Paragraph::new(Line::from(vec![
+            Span::styled("/ ", Style::default().fg(Color::Cyan)),
+            Span::styled(
+                query,
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("_", Style::default().fg(Color::Cyan)),
+            Span::styled(count_text, Style::default().fg(Color::DarkGray)),
+        ]));
+        frame.render_widget(input, area);
+    }
 
     let card_height = 4u16;
     let max_visible = (cards_area.height / card_height) as usize;

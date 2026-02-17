@@ -50,7 +50,7 @@ pub fn fetch_issues(repo: &str, state: StateFilter, assignee: AssigneeFilter) ->
         "--json".to_string(),
         "number,title,body,labels,state".to_string(),
         "--limit".to_string(),
-        "30".to_string(),
+        "500".to_string(),
     ];
     if assignee == AssigneeFilter::Mine {
         args.push("--assignee".to_string());
@@ -139,7 +139,7 @@ pub fn fetch_prs(repo: &str, state: StateFilter, assignee: AssigneeFilter) -> Ve
         "--json".to_string(),
         "number,title,body,isDraft,url,headRefName,state,mergedAt".to_string(),
         "--limit".to_string(),
-        "30".to_string(),
+        "500".to_string(),
     ];
     if assignee == AssigneeFilter::Mine {
         args.push("--assignee".to_string());
@@ -299,7 +299,7 @@ pub fn fetch_merged_pr_branches(repo: &str) -> Vec<String> {
             "--json",
             "headRefName",
             "--limit",
-            "30",
+            "500",
         ])
         .output();
 
