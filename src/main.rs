@@ -30,14 +30,17 @@ use config::{
 };
 use deps::{check_dependencies, has_missing_required};
 use git::{detect_current_repo, fetch_worktrees, pull_main, remove_worktree};
-use github::{close_issue, create_issue, fetch_issues, fetch_prs, fetch_repos};
+use github::{close_issue, create_issue, fetch_issue, fetch_issues, fetch_prs, fetch_repos};
 use hooks::start_event_socket;
 use models::{
     ConfigEditState, ConfirmAction, ConfirmModal, IssueModal, IssueSubmitResult, MergeStrategy,
     MessageLog, Mode, RepoSelectPhase, Screen, SessionStates, StateFilter, TextInput,
     REFRESH_INTERVAL, SOCKET_PATH,
 };
-use session::{create_worktree_and_session, expand_editor_command, fetch_sessions, Multiplexer};
+use session::{
+    create_session_for_worktree, create_worktree_and_session, expand_editor_command,
+    fetch_sessions, Multiplexer,
+};
 use ui::{ui, ui_configuration, ui_dependencies, ui_repo_select};
 
 fn main() -> Result<()> {
@@ -568,6 +571,78 @@ fn main() -> Result<()> {
                                                 });
                                                 app.mode = Mode::Confirming;
                                             }
+                                        }
+                                    }
+                                }
+                                KeyCode::Char('w') if app.active_section == 1 => {
+                                    if let Some(card) = app.worktrees.get(app.selected_card[1]) {
+                                        let branch = card.title.clone();
+                                        let worktree_path = card.description.clone();
+                                        // Extract issue number from branch name "issue-N"
+                                        if let Some(num_str) = branch.strip_prefix("issue-") {
+                                            if let Ok(number) = num_str.parse::<u64>() {
+                                                // Check if a session already exists
+                                                let has_session =
+                                                    app.sessions.iter().any(|s| s.title == branch);
+                                                if has_session {
+                                                    app.set_status(format!(
+                                                        "Session '{}' already exists — use 'a' to attach",
+                                                        branch
+                                                    ));
+                                                } else {
+                                                    // Fetch issue details from GitHub
+                                                    let repo = app.repo.clone();
+                                                    match fetch_issue(&repo, number) {
+                                                        Ok((title, body)) => {
+                                                            let pr_ready = get_pr_ready(&repo);
+                                                            let claude_cmd =
+                                                                get_session_command(&repo);
+                                                            match create_session_for_worktree(
+                                                                &repo,
+                                                                number,
+                                                                &title,
+                                                                &body,
+                                                                &branch,
+                                                                &worktree_path,
+                                                                app.hook_script_path.as_deref(),
+                                                                pr_ready,
+                                                                claude_cmd.as_deref(),
+                                                                app.multiplexer,
+                                                            ) {
+                                                                Ok(()) => {
+                                                                    app.sessions = fetch_sessions(
+                                                                        &app.session_states,
+                                                                        app.multiplexer,
+                                                                    );
+                                                                    app.clamp_selected();
+                                                                    app.last_refresh =
+                                                                        std::time::Instant::now();
+                                                                    app.set_status(format!(
+                                                                        "Created session for '{}'",
+                                                                        branch
+                                                                    ));
+                                                                }
+                                                                Err(e) => {
+                                                                    app.set_status(format!(
+                                                                        "Error: {}",
+                                                                        e
+                                                                    ));
+                                                                }
+                                                            }
+                                                        }
+                                                        Err(e) => {
+                                                            app.set_status(format!(
+                                                                "Failed to fetch issue #{}: {}",
+                                                                number, e
+                                                            ));
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            app.set_status(
+                                                "Cannot create session: branch is not an issue branch".to_string(),
+                                            );
                                         }
                                     }
                                 }
