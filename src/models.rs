@@ -239,6 +239,17 @@ pub enum IssueSubmitResult {
     Error(String),
 }
 
+pub enum WorktreeCreateResult {
+    WorktreeAndSession {
+        number: u64,
+        result: std::result::Result<(), String>,
+    },
+    SessionOnly {
+        branch: String,
+        result: std::result::Result<(), String>,
+    },
+}
+
 pub fn fuzzy_match(query: &str, target: &str) -> bool {
     let target_lower = target.to_lowercase();
     let mut target_chars = target_lower.chars();

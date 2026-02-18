@@ -703,6 +703,11 @@ pub fn ui(frame: &mut Frame, app: &App) {
         ui_confirm_modal(frame, modal);
     }
 
+    // Render loading spinner overlay for worktree/session creation
+    if let Some(msg) = &app.loading_message {
+        ui_loading_spinner(frame, msg, app.spinner_tick);
+    }
+
     // Render verify command prompt overlay if in EditingVerifyCommand mode
     if let Mode::EditingVerifyCommand { input } = &app.mode {
         ui_text_prompt(frame, input, "Set Verify Command", Color::Yellow,
@@ -738,6 +743,42 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
 }
 
 const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+fn ui_loading_spinner(frame: &mut Frame, message: &str, spinner_tick: usize) {
+    let area = frame.area();
+    // Small centered box: 3 rows tall, message width + padding
+    let width = (message.len() as u16 + 8).min(area.width);
+    let height = 3;
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    let rect = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, rect);
+
+    let spinner = SPINNER_FRAMES[spinner_tick % SPINNER_FRAMES.len()];
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = block.inner(rect);
+    frame.render_widget(block, rect);
+
+    let text = Paragraph::new(Line::from(vec![
+        Span::styled(
+            format!("{} ", spinner),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            message,
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]))
+    .alignment(ratatui::layout::Alignment::Center);
+    frame.render_widget(text, inner);
+}
 
 fn ui_issue_modal(frame: &mut Frame, modal: &IssueModal, spinner_tick: usize) {
     let area = centered_rect(50, 50, frame.area());
