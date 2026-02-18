@@ -117,7 +117,7 @@ pub struct ConfirmModal {
 #[derive(PartialEq)]
 pub enum Mode {
     Normal,
-    Filtering { query: TextInput },
+    Filtering { query: TextInput, focused: bool },
     CreatingIssue,
     Confirming,
     EditingVerifyCommand { input: TextInput },

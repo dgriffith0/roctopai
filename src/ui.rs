@@ -472,9 +472,9 @@ pub fn ui(frame: &mut Frame, app: &App) {
         (&pr_title, Color::Magenta, &app.pull_requests),
     ];
 
-    let filter_query = match &app.mode {
-        Mode::Filtering { query } => Some(query),
-        _ => None,
+    let (filter_query, filter_focused) = match &app.mode {
+        Mode::Filtering { query, focused } => (Some(query), *focused),
+        _ => (None, false),
     };
 
     let related_ids = app.selected_card_related_ids();
@@ -495,6 +495,7 @@ pub fn ui(frame: &mut Frame, app: &App) {
             cards,
             is_active,
             query.map(|q| q.value()),
+            is_active && filter_focused,
             selected,
             &related_ids,
         );
@@ -570,10 +571,22 @@ pub fn ui(frame: &mut Frame, app: &App) {
                 },
             ]
         }
+        Mode::Filtering { focused, .. } if *focused => vec![
+            Span::styled(" Esc ", key_style),
+            Span::styled(" Clear filter ", desc_style),
+            Span::styled(" Enter ", key_style),
+            Span::styled(" Set filter ", desc_style),
+            Span::styled(" ↑/↓ ", key_style),
+            Span::styled(" Navigate ", desc_style),
+        ],
         Mode::Filtering { .. } => vec![
             Span::styled(" Esc ", key_style),
             Span::styled(" Clear filter ", desc_style),
-            Span::styled(" ↑/↓ ", key_style),
+            Span::styled(" / ", key_style),
+            Span::styled(" Edit filter ", desc_style),
+            Span::styled(" h/l Tab/S-Tab ", key_style),
+            Span::styled(" Switch column ", desc_style),
+            Span::styled(" j/k ↑/↓ ", key_style),
             Span::styled(" Navigate ", desc_style),
         ],
         Mode::CreatingIssue => vec![
@@ -604,7 +617,10 @@ pub fn ui(frame: &mut Frame, app: &App) {
     let section_colors = [Color::Red, Color::Yellow, Color::Blue, Color::Magenta];
     let mut area_spans: Vec<Span> = Vec::new();
 
-    if matches!(app.mode, Mode::Normal) {
+    if matches!(
+        app.mode,
+        Mode::Normal | Mode::Filtering { focused: false, .. }
+    ) {
         let section_label_style = Style::default()
             .fg(section_colors[app.active_section])
             .add_modifier(Modifier::BOLD);
@@ -1057,6 +1073,7 @@ fn render_column(
     cards: &[Card],
     is_active: bool,
     filter_query: Option<&str>,
+    filter_focused: bool,
     selected: Option<usize>,
     related_ids: &HashSet<String>,
 ) {
@@ -1093,6 +1110,24 @@ fn render_column(
     } else {
         (inner, None)
     };
+
+    // Render filter input if active
+    if let (Some(area), Some(query)) = (filter_area, filter_query) {
+        let mut spans = vec![
+            Span::styled("/ ", Style::default().fg(Color::Cyan)),
+            Span::styled(
+                query,
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ];
+        if filter_focused {
+            spans.push(Span::styled("_", Style::default().fg(Color::Cyan)));
+        }
+        let input = Paragraph::new(Line::from(spans));
+        frame.render_widget(input, area);
+    }
 
     // Filter cards
     let visible_cards: Vec<&Card> = if let Some(query) = filter_query {

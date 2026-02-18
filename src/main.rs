@@ -476,9 +476,14 @@ fn main() -> Result<()> {
                 }
                 Screen::Board => {
                     match &mut app.mode {
-                        Mode::Filtering { query } => match key.code {
+                        Mode::Filtering { query, focused } if *focused => match key.code {
                             KeyCode::Esc => {
                                 app.mode = Mode::Normal;
+                            }
+                            KeyCode::Enter => {
+                                if let Mode::Filtering { focused, .. } = &mut app.mode {
+                                    *focused = false;
+                                }
                             }
                             KeyCode::Backspace => {
                                 query.delete_back();
@@ -508,10 +513,28 @@ fn main() -> Result<()> {
                             }
                             _ => {}
                         },
-                        Mode::Normal => {
+                        Mode::Normal | Mode::Filtering { .. } => {
+                            let is_filtering = matches!(app.mode, Mode::Filtering { .. });
                             match key.code {
-                                KeyCode::Char('q') | KeyCode::Esc => break,
-                                KeyCode::Enter => {
+                                KeyCode::Char('q') if !is_filtering => break,
+                                KeyCode::Esc => {
+                                    if is_filtering {
+                                        app.mode = Mode::Normal;
+                                    } else {
+                                        break;
+                                    }
+                                }
+                                KeyCode::Char('/') => {
+                                    if let Mode::Filtering { focused, .. } = &mut app.mode {
+                                        *focused = true;
+                                    } else {
+                                        app.mode = Mode::Filtering {
+                                            query: TextInput::new(),
+                                            focused: true,
+                                        };
+                                    }
+                                }
+                                KeyCode::Enter if !is_filtering => {
                                     app.enter_repo_select();
                                 }
                                 KeyCode::Tab | KeyCode::Char('l') => {
@@ -540,12 +563,7 @@ fn main() -> Result<()> {
                                     app.dependencies = check_dependencies();
                                     app.screen = Screen::Dependencies;
                                 }
-                                KeyCode::Char('/') => {
-                                    app.mode = Mode::Filtering {
-                                        query: TextInput::new(),
-                                    };
-                                }
-                                KeyCode::Char('n') => {
+                                KeyCode::Char('n') if !is_filtering => {
                                     app.mode = Mode::CreatingIssue;
                                     app.issue_modal = Some(IssueModal::new());
                                 }
