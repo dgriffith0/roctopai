@@ -8,6 +8,9 @@ use crate::git::{get_repo_name, trust_directory};
 use crate::hooks::write_worktree_hook_config;
 use crate::models::{Card, SessionStates};
 
+/// Session name for the main worktree exploration session.
+pub const MAIN_SESSION_NAME: &str = "main-explore";
+
 /// Supported terminal multiplexers.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -653,4 +656,28 @@ pub fn create_worktree_and_session(
     mux.send_keys(&branch, &shell_cmd);
 
     Ok(())
+}
+
+/// Create a Claude session on the main worktree for exploration (no prompt).
+///
+/// Returns `true` if a new session was created, `false` if one already existed.
+pub fn ensure_main_session(mux: Multiplexer) -> Result<bool, String> {
+    let existing = mux.list_sessions();
+    if existing.iter().any(|s| s == MAIN_SESSION_NAME) {
+        return Ok(false);
+    }
+
+    // Use the current working directory (the main worktree)
+    let cwd = std::env::current_dir()
+        .map_err(|e| format!("Failed to get current directory: {}", e))?
+        .to_string_lossy()
+        .to_string();
+
+    mux.create_session(MAIN_SESSION_NAME, &cwd)?;
+
+    // Wait for shell to initialize, then launch claude with no prompt
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    mux.send_keys(MAIN_SESSION_NAME, "claude");
+
+    Ok(true)
 }
