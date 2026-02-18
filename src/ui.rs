@@ -630,6 +630,8 @@ pub fn ui(frame: &mut Frame, app: &App) {
                 Span::styled(" Pull ", desc_style),
                 Span::styled(" n ", key_accent),
                 Span::styled(" New issue ", desc_style),
+                Span::styled(" t ", key_accent),
+                Span::styled(" Main Claude ", desc_style),
                 Span::styled(" D ", key_style),
                 Span::styled(" Deps ", desc_style),
                 Span::styled(" C ", key_style),

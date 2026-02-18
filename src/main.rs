@@ -40,8 +40,8 @@ use models::{
     SessionStates, StateFilter, TextInput, WorktreeCreateResult, REFRESH_INTERVAL, SOCKET_PATH,
 };
 use session::{
-    create_session_for_worktree, create_worktree_and_session, expand_editor_command,
-    fetch_sessions, Multiplexer,
+    create_session_for_worktree, create_worktree_and_session, ensure_main_session,
+    expand_editor_command, fetch_sessions, Multiplexer, MAIN_SESSION_NAME,
 };
 use ui::{ui, ui_configuration, ui_dependencies, ui_repo_select};
 
@@ -942,6 +942,32 @@ fn main() -> Result<()> {
                                         app.multiplexer,
                                     ));
                                     app.screen = Screen::Configuration;
+                                }
+                                // Main worktree Claude session: create if needed, then attach
+                                KeyCode::Char('t') => {
+                                    match ensure_main_session(app.multiplexer) {
+                                        Ok(created) => {
+                                            if created {
+                                                app.set_status(
+                                                    "Created main explore session".to_string(),
+                                                );
+                                            }
+                                        }
+                                        Err(e) => {
+                                            app.set_status(format!(
+                                                "Failed to create main session: {}",
+                                                e
+                                            ));
+                                        }
+                                    }
+                                    // Suspend TUI and attach to the session
+                                    disable_raw_mode()?;
+                                    io::stdout().execute(LeaveAlternateScreen)?;
+                                    let _ = app.multiplexer.attach(MAIN_SESSION_NAME);
+                                    enable_raw_mode()?;
+                                    io::stdout().execute(EnterAlternateScreen)?;
+                                    terminal.clear()?;
+                                    app.refresh_data();
                                 }
                                 // PR actions: 'o' to open in browser, 'r' to mark ready
                                 KeyCode::Char('o') if app.active_section == 3 => {
