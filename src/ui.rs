@@ -758,7 +758,7 @@ fn ui_issue_modal(frame: &mut Frame, modal: &IssueModal, spinner_tick: usize) {
     let inner = outer_block.inner(area);
     frame.render_widget(outer_block, area);
 
-    // Layout: title field (3), body field (remaining), error/spinner (1), hint (1)
+    // Layout: title field (3), body field (remaining), checkbox (1), error/spinner (1), hint (1)
     let has_error = modal.error.is_some();
     let has_status = has_error || modal.submitting;
     let chunks = Layout::default()
@@ -766,6 +766,7 @@ fn ui_issue_modal(frame: &mut Frame, modal: &IssueModal, spinner_tick: usize) {
         .constraints([
             Constraint::Length(3),                              // title input
             Constraint::Min(3),                                 // body input
+            Constraint::Length(1),                              // create worktree toggle
             Constraint::Length(if has_status { 1 } else { 0 }), // error or spinner
             Constraint::Length(1),                              // hint
         ])
@@ -844,6 +845,30 @@ fn ui_issue_modal(frame: &mut Frame, modal: &IssueModal, spinner_tick: usize) {
         .wrap(Wrap { trim: false });
     frame.render_widget(body_paragraph, chunks[1]);
 
+    // Create worktree checkbox
+    let checkbox_icon = if modal.create_worktree { "[x]" } else { "[ ]" };
+    let checkbox_style = if modal.submitting {
+        Style::default().fg(Color::DarkGray)
+    } else if modal.active_field == 2 {
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let checkbox = Paragraph::new(Line::from(vec![
+        Span::styled(format!("{} ", checkbox_icon), checkbox_style),
+        Span::styled(
+            "Create worktree and session",
+            if modal.submitting {
+                Style::default().fg(Color::DarkGray)
+            } else {
+                Style::default().fg(Color::White)
+            },
+        ),
+    ]));
+    frame.render_widget(checkbox, chunks[2]);
+
     // Spinner or error
     if modal.submitting {
         let spinner = SPINNER_FRAMES[spinner_tick % SPINNER_FRAMES.len()];
@@ -861,26 +886,26 @@ fn ui_issue_modal(frame: &mut Frame, modal: &IssueModal, spinner_tick: usize) {
                     .add_modifier(Modifier::BOLD),
             ),
         ]));
-        frame.render_widget(spinner_text, chunks[2]);
+        frame.render_widget(spinner_text, chunks[3]);
     } else if let Some(err) = &modal.error {
         let err_text = Paragraph::new(Line::from(vec![Span::styled(
             err.as_str(),
             Style::default().fg(Color::Red),
         )]));
-        frame.render_widget(err_text, chunks[2]);
+        frame.render_widget(err_text, chunks[3]);
     }
 
     // Hint
     let hint_text = if modal.submitting {
         "Esc: cancel"
     } else {
-        "Tab: switch field | Ctrl+S: submit | Esc: cancel"
+        "Tab: switch field | Space: toggle | Ctrl+S: submit | Esc: cancel"
     };
     let hint = Paragraph::new(Line::from(vec![Span::styled(
         hint_text,
         Style::default().fg(Color::DarkGray),
     )]));
-    frame.render_widget(hint, chunks[3]);
+    frame.render_widget(hint, chunks[4]);
 }
 
 fn ui_confirm_modal(frame: &mut Frame, modal: &ConfirmModal) {

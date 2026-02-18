@@ -214,9 +214,10 @@ impl RepoSelectState {
 pub struct IssueModal {
     pub title: TextInput,
     pub body: TextInput,
-    pub active_field: usize, // 0 = title, 1 = body
+    pub active_field: usize, // 0 = title, 1 = body, 2 = create_worktree toggle
     pub error: Option<String>,
     pub submitting: bool,
+    pub create_worktree: bool,
 }
 
 impl IssueModal {
@@ -227,6 +228,7 @@ impl IssueModal {
             active_field: 0,
             error: None,
             submitting: false,
+            create_worktree: true,
         }
     }
 }
@@ -234,7 +236,7 @@ impl IssueModal {
 pub enum IssueSubmitResult {
     Success {
         number: u64,
-        worktree_result: std::result::Result<(), String>,
+        worktree_result: Option<std::result::Result<(), String>>,
     },
     Error(String),
 }
