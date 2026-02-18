@@ -130,6 +130,17 @@ pub enum Screen {
     Board,
     Dependencies,
     Configuration,
+    AiSetup,
+}
+
+pub struct AiSetupState {
+    pub selected: usize, // 0 = Claude, 1 = Cursor
+}
+
+impl AiSetupState {
+    pub fn new() -> Self {
+        Self { selected: 0 }
+    }
 }
 
 pub struct ConfigEditState {

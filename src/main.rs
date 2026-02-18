@@ -28,14 +28,14 @@ use config::{
     get_auto_open_pr, get_editor_command, get_multiplexer, get_pr_ready, get_session_command,
     get_verify_command, load_config, save_config, set_editor_command, set_verify_command,
 };
-use deps::{check_dependencies, has_missing_required};
+use deps::{check_dependencies, detect_ai_tools, has_missing_required};
 use git::{detect_current_repo, fetch_worktrees, pull_main, remove_worktree};
 use github::{close_issue, create_issue, fetch_issue, fetch_issues, fetch_prs, fetch_repos};
 use hooks::start_event_socket;
 use models::{
-    ConfigEditState, ConfirmAction, ConfirmModal, IssueModal, IssueSubmitResult, MergeStrategy,
-    MessageLog, Mode, RepoSelectPhase, Screen, SessionStates, StateFilter, TextInput,
-    WorktreeCreateResult, REFRESH_INTERVAL, SOCKET_PATH,
+    AiSetupState, ConfigEditState, ConfirmAction, ConfirmModal, IssueModal, IssueSubmitResult,
+    MergeStrategy, MessageLog, Mode, RepoSelectPhase, Screen, SessionStates, StateFilter,
+    TextInput, WorktreeCreateResult, REFRESH_INTERVAL, SOCKET_PATH,
 };
 use session::{
     create_session_for_worktree, create_worktree_and_session, expand_editor_command,
@@ -68,18 +68,45 @@ fn main() -> Result<()> {
         app.screen = Screen::Dependencies;
     } else {
         app.dependencies = initial_deps;
-        // Detect the current git repo first, falling back to saved config
-        let detected_repo = detect_current_repo();
-        let configured_repo = load_config().map(|c| c.repo).filter(|r| !r.is_empty());
 
-        let repo = detected_repo.or(configured_repo);
+        // Auto-configure default session command based on installed AI tools
+        let existing_default = config::get_default_session_command();
+        if existing_default.is_none() {
+            let (has_claude, has_cursor) = detect_ai_tools();
+            match (has_claude, has_cursor) {
+                (true, false) => {
+                    let _ = config::set_default_session_command("{claude}");
+                }
+                (false, true) => {
+                    let _ = config::set_default_session_command("{cursor}");
+                }
+                (true, true) => {
+                    // Both installed — prompt user to choose
+                    app.ai_setup = Some(AiSetupState::new());
+                    app.screen = Screen::AiSetup;
+                }
+                _ => {
+                    // Neither available — deps check should have caught this,
+                    // but default to claude template as fallback
+                    let _ = config::set_default_session_command("{claude}");
+                }
+            }
+        }
 
-        if let Some(repo) = repo {
-            app.repo = repo.clone();
-            let _ = save_config(&repo);
-            app.refresh_data();
-            app.selected_card = [0; 4];
-            app.screen = Screen::Board;
+        // If not showing AI setup, proceed to detect repo and enter board
+        if app.screen != Screen::AiSetup {
+            let detected_repo = detect_current_repo();
+            let configured_repo = load_config().map(|c| c.repo).filter(|r| !r.is_empty());
+
+            let repo = detected_repo.or(configured_repo);
+
+            if let Some(repo) = repo {
+                app.repo = repo.clone();
+                let _ = save_config(&repo);
+                app.refresh_data();
+                app.selected_card = [0; 4];
+                app.screen = Screen::Board;
+            }
         }
     }
 
@@ -89,6 +116,11 @@ fn main() -> Result<()> {
             Screen::Board => ui(frame, &app),
             Screen::Dependencies => ui_dependencies(frame, &app.dependencies),
             Screen::Configuration => ui_configuration(frame, &app),
+            Screen::AiSetup => {
+                if let Some(state) = &app.ai_setup {
+                    ui::ui_ai_setup(frame, state);
+                }
+            }
         })?;
 
         // Auto-refresh when interval has elapsed and on Board screen in Normal mode
@@ -248,6 +280,48 @@ fn main() -> Result<()> {
                     }
                     _ => {}
                 },
+                Screen::AiSetup => {
+                    if let Some(setup) = &mut app.ai_setup {
+                        match key.code {
+                            KeyCode::Char('j') | KeyCode::Down => {
+                                if setup.selected == 0 {
+                                    setup.selected = 1;
+                                }
+                            }
+                            KeyCode::Char('k') | KeyCode::Up => {
+                                if setup.selected == 1 {
+                                    setup.selected = 0;
+                                }
+                            }
+                            KeyCode::Enter => {
+                                let cmd = if setup.selected == 0 {
+                                    "{claude}"
+                                } else {
+                                    "{cursor}"
+                                };
+                                let _ = config::set_default_session_command(cmd);
+                                app.ai_setup = None;
+
+                                // Now proceed with repo detection
+                                let detected_repo = detect_current_repo();
+                                let configured_repo =
+                                    load_config().map(|c| c.repo).filter(|r| !r.is_empty());
+                                let repo = detected_repo.or(configured_repo);
+
+                                if let Some(repo) = repo {
+                                    app.repo = repo.clone();
+                                    let _ = save_config(&repo);
+                                    app.refresh_data();
+                                    app.selected_card = [0; 4];
+                                    app.screen = Screen::Board;
+                                } else {
+                                    app.screen = Screen::RepoSelect;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 Screen::Configuration => {
                     if let Some(config_edit) = &mut app.config_edit {
                         match key.code {

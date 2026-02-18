@@ -26,6 +26,10 @@ pub struct Config {
     pub session_commands: HashMap<String, String>,
     #[serde(default)]
     pub multiplexer: Option<Multiplexer>,
+    /// Global default session command template used when no per-repo override exists.
+    /// Set during initial setup based on which AI tools are installed.
+    #[serde(default)]
+    pub default_session_command: Option<String>,
 }
 
 pub fn config_path() -> PathBuf {
@@ -68,6 +72,9 @@ pub fn save_config(repo: &str) -> Result<()> {
         .as_ref()
         .map(|c| c.session_commands.clone())
         .unwrap_or_default();
+    let default_session_command = existing
+        .as_ref()
+        .and_then(|c| c.default_session_command.clone());
     let multiplexer = existing.and_then(|c| c.multiplexer);
     let config = Config {
         repo: repo.to_string(),
@@ -77,6 +84,7 @@ pub fn save_config(repo: &str) -> Result<()> {
         auto_open_pr,
         session_commands,
         multiplexer,
+        default_session_command,
     };
     fs::write(path, serde_json::to_string_pretty(&config)?)?;
     Ok(())
@@ -115,6 +123,7 @@ pub fn set_editor_command(repo: &str, command: &str) -> Result<()> {
         auto_open_pr: HashMap::new(),
         session_commands: HashMap::new(),
         multiplexer: None,
+        default_session_command: None,
     });
     config
         .editor_commands
@@ -131,6 +140,7 @@ pub fn set_verify_command(repo: &str, command: &str) -> Result<()> {
         auto_open_pr: HashMap::new(),
         session_commands: HashMap::new(),
         multiplexer: None,
+        default_session_command: None,
     });
     config
         .verify_commands
@@ -157,4 +167,23 @@ pub fn get_session_command(repo: &str) -> Option<String> {
 
 pub fn get_multiplexer() -> Option<Multiplexer> {
     load_config()?.multiplexer
+}
+
+pub fn get_default_session_command() -> Option<String> {
+    load_config()?.default_session_command
+}
+
+pub fn set_default_session_command(command: &str) -> Result<()> {
+    let mut config = load_config().unwrap_or(Config {
+        repo: String::new(),
+        verify_commands: HashMap::new(),
+        editor_commands: HashMap::new(),
+        pr_ready: HashMap::new(),
+        auto_open_pr: HashMap::new(),
+        session_commands: HashMap::new(),
+        multiplexer: None,
+        default_session_command: None,
+    });
+    config.default_session_command = Some(command.to_string());
+    save_full_config(&config)
 }

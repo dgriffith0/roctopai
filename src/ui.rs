@@ -13,8 +13,8 @@ use crate::app::App;
 use crate::config::config_path;
 use crate::deps::Dependency;
 use crate::models::{
-    card_matches, Card, ConfirmModal, IssueModal, Mode, RepoSelectPhase, RepoSelectState,
-    StateFilter, TextInput, REFRESH_INTERVAL,
+    card_matches, AiSetupState, Card, ConfirmModal, IssueModal, Mode, RepoSelectPhase,
+    RepoSelectState, StateFilter, TextInput, REFRESH_INTERVAL,
 };
 use crate::session::{
     default_editor_command, COMMAND_SHORTCUTS, DEFAULT_CLAUDE_COMMAND, DEFAULT_EDITOR_COMMAND,
@@ -380,6 +380,97 @@ pub fn ui_dependencies(frame: &mut Frame, deps: &[Dependency]) {
         )]));
         frame.render_widget(warning, bottom_rows[1]);
     }
+}
+
+pub fn ui_ai_setup(frame: &mut Frame, state: &AiSetupState) {
+    let area = frame.area();
+
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(25),
+            Constraint::Min(0),
+            Constraint::Percentage(25),
+        ])
+        .split(area);
+
+    let horizontal = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(20),
+            Constraint::Percentage(60),
+            Constraint::Percentage(20),
+        ])
+        .split(vertical[1]);
+
+    let center = horizontal[1];
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // title
+            Constraint::Length(2), // description
+            Constraint::Length(1), // spacing
+            Constraint::Length(1), // option 0: Claude
+            Constraint::Length(1), // option 1: Cursor
+            Constraint::Length(2), // spacing
+            Constraint::Length(1), // hint
+            Constraint::Min(0),
+        ])
+        .split(center);
+
+    let title = Paragraph::new(Line::from(vec![Span::styled(
+        "Select AI Coding Assistant",
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )]));
+    frame.render_widget(title, chunks[0]);
+
+    let desc = Paragraph::new(Line::from(vec![Span::styled(
+        "Both Claude and Cursor are installed. Choose your default:",
+        Style::default().fg(Color::Gray),
+    )]));
+    frame.render_widget(desc, chunks[1]);
+
+    let options = [
+        ("Claude Code", "claude CLI for autonomous coding sessions"),
+        ("Cursor", "cursor-agent CLI for autonomous coding sessions"),
+    ];
+
+    for (i, (label, desc)) in options.iter().enumerate() {
+        let is_selected = state.selected == i;
+        let line = if is_selected {
+            Line::from(vec![
+                Span::styled(
+                    " > ",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    *label,
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(format!("  {}", desc), Style::default().fg(Color::DarkGray)),
+            ])
+        } else {
+            Line::from(vec![
+                Span::styled("   ", Style::default()),
+                Span::styled(*label, Style::default().fg(Color::Gray)),
+                Span::styled(format!("  {}", desc), Style::default().fg(Color::DarkGray)),
+            ])
+        };
+        frame.render_widget(Paragraph::new(line), chunks[3 + i]);
+    }
+
+    let hint = Paragraph::new(Line::from(vec![Span::styled(
+        "j/k ↑/↓ navigate  Enter select",
+        Style::default().fg(Color::DarkGray),
+    )]));
+    frame.render_widget(hint, chunks[6]);
 }
 
 pub fn ui(frame: &mut Frame, app: &App) {
@@ -1563,9 +1654,11 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
             .borders(Borders::ALL)
             .border_style(session_border)
             .title(" Command ");
+        let session_placeholder = crate::config::get_default_session_command()
+            .unwrap_or_else(|| DEFAULT_CLAUDE_COMMAND.to_string());
         let session_spans = if config_edit.session_command.is_empty() && !session_active {
             vec![Span::styled(
-                DEFAULT_CLAUDE_COMMAND,
+                session_placeholder,
                 Style::default()
                     .fg(Color::DarkGray)
                     .add_modifier(Modifier::BOLD),

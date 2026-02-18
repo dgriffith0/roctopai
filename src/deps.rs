@@ -105,3 +105,19 @@ fn check_dep(
 pub fn has_missing_required(deps: &[Dependency]) -> bool {
     deps.iter().any(|d| d.required && !d.available)
 }
+
+/// Detect which AI coding assistants are available on the system.
+/// Returns `(claude_available, cursor_available)`.
+pub fn detect_ai_tools() -> (bool, bool) {
+    let claude = Command::new("which")
+        .arg("claude")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    let cursor = Command::new("which")
+        .arg("cursor-agent")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    (claude, cursor)
+}

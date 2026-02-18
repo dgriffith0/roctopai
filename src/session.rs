@@ -525,7 +525,10 @@ pub fn create_session_for_worktree(
     fs::write(&prompt_file, &prompt).map_err(|e| format!("Failed to write prompt file: {}", e))?;
 
     // Send session command to the single pane
-    let template = session_command.unwrap_or(DEFAULT_CLAUDE_COMMAND);
+    let global_default = crate::config::get_default_session_command();
+    let template = session_command
+        .or(global_default.as_deref())
+        .unwrap_or(DEFAULT_CLAUDE_COMMAND);
     let shell_cmd = expand_template(
         template,
         &prompt_file,
@@ -629,7 +632,10 @@ pub fn create_worktree_and_session(
     fs::write(&prompt_file, &prompt).map_err(|e| format!("Failed to write prompt file: {}", e))?;
 
     // Send session command to the single pane
-    let template = session_command.unwrap_or(DEFAULT_CLAUDE_COMMAND);
+    let global_default = crate::config::get_default_session_command();
+    let template = session_command
+        .or(global_default.as_deref())
+        .unwrap_or(DEFAULT_CLAUDE_COMMAND);
     let shell_cmd = expand_template(
         template,
         &prompt_file,

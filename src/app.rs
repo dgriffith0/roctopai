@@ -7,8 +7,9 @@ use crate::git::{cleanup_merged_worktrees, fetch_main_behind_count, fetch_worktr
 use crate::github::{fetch_issues, fetch_prs};
 use crate::hooks::ensure_hook_script;
 use crate::models::{
-    AssigneeFilter, Card, ConfigEditState, ConfirmModal, IssueModal, IssueSubmitResult, MessageLog,
-    Mode, RepoSelectState, Screen, SessionStates, StateFilter, WorktreeCreateResult, MAX_MESSAGES,
+    AiSetupState, AssigneeFilter, Card, ConfigEditState, ConfirmModal, IssueModal,
+    IssueSubmitResult, MessageLog, Mode, RepoSelectState, Screen, SessionStates, StateFilter,
+    WorktreeCreateResult, MAX_MESSAGES,
 };
 use crate::session::{fetch_sessions, Multiplexer};
 
@@ -47,6 +48,7 @@ pub struct App {
     /// Tracks sessions that have been nudged to continue (to avoid repeated nudges).
     /// Maps branch name to the number of nudges sent.
     pub nudged_sessions: HashMap<String, usize>,
+    pub ai_setup: Option<AiSetupState>,
 }
 
 impl App {
@@ -91,6 +93,7 @@ impl App {
             main_behind_count: 0,
             multiplexer,
             nudged_sessions: HashMap::new(),
+            ai_setup: None,
         }
     }
 
