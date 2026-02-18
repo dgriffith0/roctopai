@@ -4,6 +4,11 @@
 
 <h1 align="center">octopai</h1>
 
+<p align="center">
+  <a href="https://github.com/dgriffith0/octopai/releases/latest"><img src="https://img.shields.io/github/v/release/dgriffith0/octopai" alt="Latest Release" /></a>
+  <a href="https://github.com/dgriffith0/octopai/blob/main/LICENSE"><img src="https://img.shields.io/github/license/dgriffith0/octopai" alt="License" /></a>
+</p>
+
 <p align="center">A terminal UI for managing GitHub issues, worktrees, and AI-powered coding sessions.<br/>Built with Rust and <a href="https://github.com/ratatui/ratatui">Ratatui</a>.</p>
 
 ---
@@ -33,7 +38,21 @@ Octopai checks for these on startup and will tell you what's missing.
 
 ---
 
-## Quick start
+## Install
+
+### Homebrew (macOS)
+
+```sh
+brew install dgriffith0/octopai/octopai
+```
+
+### Pre-built binaries
+
+Download the latest release for your platform from [GitHub Releases](https://github.com/dgriffith0/octopai/releases/latest).
+
+Supported targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu`.
+
+### Cargo
 
 From GitHub:
 
@@ -41,16 +60,17 @@ From GitHub:
 cargo install --git https://github.com/dgriffith0/octopai
 ```
 
-Or clone and install locally:
+Or clone and build locally:
 
 ```sh
 git clone https://github.com/dgriffith0/octopai.git
 cd octopai
 cargo install --path .
-octopai
 ```
 
-On first launch you'll be prompted to enter a GitHub user or organization name. Pick a repository and you're on the board.
+## Quick start
+
+Run `octopai` in your terminal. On first launch you'll be prompted to enter a GitHub user or organization name. Pick a repository and you're on the board.
 
 ---
 
