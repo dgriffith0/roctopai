@@ -4,7 +4,7 @@ use std::time::Duration;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, Padding, Paragraph, Wrap},
     Frame,
 };
@@ -819,31 +819,28 @@ fn ui_issue_modal(frame: &mut Frame, modal: &IssueModal, spinner_tick: usize) {
         .border_style(body_style)
         .title(" Body ");
     let show_body_cursor = modal.active_field == 1 && !modal.submitting;
-    // For multi-line body, insert cursor character at position
-    let body_display = if show_body_cursor {
-        let before = modal.body.before_cursor();
-        let after = modal.body.after_cursor();
-        if after.is_empty() {
-            format!("{}_", before)
-        } else {
-            // Use a block cursor by wrapping char in markers isn't possible in plain text,
-            // so we insert an underscore cursor indicator
-            let mut after_chars = after.chars();
-            let cursor_char = after_chars.next().unwrap();
-            // We can't easily style individual chars in a plain string for Paragraph,
-            // so show the cursor as the text with a visible marker
-            format!(
-                "{}[{}]{}",
-                before,
-                cursor_char,
-                after_chars.collect::<String>()
-            )
+    let body_spans = text_input_spans(
+        &modal.body,
+        Style::default().fg(text_color),
+        Style::default().fg(Color::Black).bg(Color::Cyan),
+        show_body_cursor,
+    );
+    // Split spans into lines at newline boundaries for multi-line display
+    let mut lines: Vec<Line> = vec![Line::from(vec![])];
+    for span in body_spans {
+        let content = span.content.to_string();
+        let parts: Vec<&str> = content.split('\n').collect();
+        for (i, part) in parts.iter().enumerate() {
+            if i > 0 {
+                lines.push(Line::from(vec![]));
+            }
+            if !part.is_empty() {
+                let last = lines.last_mut().unwrap();
+                last.spans.push(Span::styled(part.to_string(), span.style));
+            }
         }
-    } else {
-        modal.body.value().to_string()
-    };
-    let body_paragraph = Paragraph::new(body_display)
-        .style(Style::default().fg(text_color))
+    }
+    let body_paragraph = Paragraph::new(Text::from(lines))
         .block(body_block)
         .wrap(Wrap { trim: false });
     frame.render_widget(body_paragraph, chunks[1]);
