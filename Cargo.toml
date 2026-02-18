@@ -5,6 +5,7 @@ edition = "2021"
 description = "AI-powered CLI assistant for managing multiple projects"
 homepage = "https://github.com/dgriffith0/octopai"
 repository = "https://github.com/dgriffith0/octopai"
+license = "MIT"
 
 [dependencies]
 ratatui = "0.28"
