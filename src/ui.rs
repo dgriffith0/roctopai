@@ -4,7 +4,7 @@ use std::time::Duration;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, Padding, Paragraph, Wrap},
     Frame,
 };
@@ -452,19 +452,23 @@ pub fn ui(frame: &mut Frame, app: &App) {
         .split(outer[1]);
 
     let issue_title = format!(
-        " Issues [{}|{}] ",
+        " Issues ({}) [{}|{}] ",
+        app.issues.len(),
         app.issue_state_filter.label(),
         app.issue_assignee_filter.label()
     );
     let pr_title = format!(
-        " Pull Requests [{}|{}] ",
+        " Pull Requests ({}) [{}|{}] ",
+        app.pull_requests.len(),
         app.pr_state_filter.label(),
         app.pr_assignee_filter.label()
     );
+    let worktree_title = format!(" Worktrees ({}) ", app.worktrees.len());
+    let session_title = format!(" Sessions ({}) ", app.sessions.len());
     let section_data: [(&str, Color, &[Card]); 4] = [
         (&issue_title, Color::Red, &app.issues),
-        (" Worktrees ", Color::Yellow, &app.worktrees),
-        (" Sessions ", Color::Blue, &app.sessions),
+        (&worktree_title, Color::Yellow, &app.worktrees),
+        (&session_title, Color::Blue, &app.sessions),
         (&pr_title, Color::Magenta, &app.pull_requests),
     ];
 
@@ -719,6 +723,11 @@ pub fn ui(frame: &mut Frame, app: &App) {
         ui_confirm_modal(frame, modal);
     }
 
+    // Render loading spinner overlay for worktree/session creation
+    if let Some(msg) = &app.loading_message {
+        ui_loading_spinner(frame, msg, app.spinner_tick);
+    }
+
     // Render verify command prompt overlay if in EditingVerifyCommand mode
     if let Mode::EditingVerifyCommand { input } = &app.mode {
         ui_text_prompt(frame, input, "Set Verify Command", Color::Yellow,
@@ -755,6 +764,42 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
 
 const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
+fn ui_loading_spinner(frame: &mut Frame, message: &str, spinner_tick: usize) {
+    let area = frame.area();
+    // Small centered box: 3 rows tall, message width + padding
+    let width = (message.len() as u16 + 8).min(area.width);
+    let height = 3;
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    let rect = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, rect);
+
+    let spinner = SPINNER_FRAMES[spinner_tick % SPINNER_FRAMES.len()];
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = block.inner(rect);
+    frame.render_widget(block, rect);
+
+    let text = Paragraph::new(Line::from(vec![
+        Span::styled(
+            format!("{} ", spinner),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            message,
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]))
+    .alignment(ratatui::layout::Alignment::Center);
+    frame.render_widget(text, inner);
+}
+
 fn ui_issue_modal(frame: &mut Frame, modal: &IssueModal, spinner_tick: usize) {
     let area = centered_rect(50, 50, frame.area());
 
@@ -774,7 +819,7 @@ fn ui_issue_modal(frame: &mut Frame, modal: &IssueModal, spinner_tick: usize) {
     let inner = outer_block.inner(area);
     frame.render_widget(outer_block, area);
 
-    // Layout: title field (3), body field (remaining), error/spinner (1), hint (1)
+    // Layout: title field (3), body field (remaining), checkbox (1), error/spinner (1), hint (1)
     let has_error = modal.error.is_some();
     let has_status = has_error || modal.submitting;
     let chunks = Layout::default()
@@ -782,6 +827,7 @@ fn ui_issue_modal(frame: &mut Frame, modal: &IssueModal, spinner_tick: usize) {
         .constraints([
             Constraint::Length(3),                              // title input
             Constraint::Min(3),                                 // body input
+            Constraint::Length(1),                              // create worktree toggle
             Constraint::Length(if has_status { 1 } else { 0 }), // error or spinner
             Constraint::Length(1),                              // hint
         ])
@@ -831,34 +877,55 @@ fn ui_issue_modal(frame: &mut Frame, modal: &IssueModal, spinner_tick: usize) {
         .border_style(body_style)
         .title(" Body ");
     let show_body_cursor = modal.active_field == 1 && !modal.submitting;
-    // For multi-line body, insert cursor character at position
-    let body_display = if show_body_cursor {
-        let before = modal.body.before_cursor();
-        let after = modal.body.after_cursor();
-        if after.is_empty() {
-            format!("{}_", before)
-        } else {
-            // Use a block cursor by wrapping char in markers isn't possible in plain text,
-            // so we insert an underscore cursor indicator
-            let mut after_chars = after.chars();
-            let cursor_char = after_chars.next().unwrap();
-            // We can't easily style individual chars in a plain string for Paragraph,
-            // so show the cursor as the text with a visible marker
-            format!(
-                "{}[{}]{}",
-                before,
-                cursor_char,
-                after_chars.collect::<String>()
-            )
+    let body_spans = text_input_spans(
+        &modal.body,
+        Style::default().fg(text_color),
+        Style::default().fg(Color::Black).bg(Color::Cyan),
+        show_body_cursor,
+    );
+    // Split spans into lines at newline boundaries for multi-line display
+    let mut lines: Vec<Line> = vec![Line::from(vec![])];
+    for span in body_spans {
+        let content = span.content.to_string();
+        let parts: Vec<&str> = content.split('\n').collect();
+        for (i, part) in parts.iter().enumerate() {
+            if i > 0 {
+                lines.push(Line::from(vec![]));
+            }
+            if !part.is_empty() {
+                let last = lines.last_mut().unwrap();
+                last.spans.push(Span::styled(part.to_string(), span.style));
+            }
         }
-    } else {
-        modal.body.value().to_string()
-    };
-    let body_paragraph = Paragraph::new(body_display)
-        .style(Style::default().fg(text_color))
+    }
+    let body_paragraph = Paragraph::new(Text::from(lines))
         .block(body_block)
         .wrap(Wrap { trim: false });
     frame.render_widget(body_paragraph, chunks[1]);
+
+    // Create worktree checkbox
+    let checkbox_icon = if modal.create_worktree { "[x]" } else { "[ ]" };
+    let checkbox_style = if modal.submitting {
+        Style::default().fg(Color::DarkGray)
+    } else if modal.active_field == 2 {
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let checkbox = Paragraph::new(Line::from(vec![
+        Span::styled(format!("{} ", checkbox_icon), checkbox_style),
+        Span::styled(
+            "Create worktree and session",
+            if modal.submitting {
+                Style::default().fg(Color::DarkGray)
+            } else {
+                Style::default().fg(Color::White)
+            },
+        ),
+    ]));
+    frame.render_widget(checkbox, chunks[2]);
 
     // Spinner or error
     if modal.submitting {
@@ -877,26 +944,26 @@ fn ui_issue_modal(frame: &mut Frame, modal: &IssueModal, spinner_tick: usize) {
                     .add_modifier(Modifier::BOLD),
             ),
         ]));
-        frame.render_widget(spinner_text, chunks[2]);
+        frame.render_widget(spinner_text, chunks[3]);
     } else if let Some(err) = &modal.error {
         let err_text = Paragraph::new(Line::from(vec![Span::styled(
             err.as_str(),
             Style::default().fg(Color::Red),
         )]));
-        frame.render_widget(err_text, chunks[2]);
+        frame.render_widget(err_text, chunks[3]);
     }
 
     // Hint
     let hint_text = if modal.submitting {
         "Esc: cancel"
     } else {
-        "Tab: switch field | Ctrl+S: submit | Esc: cancel"
+        "Tab: switch field | Space: toggle | Ctrl+S: submit | Esc: cancel"
     };
     let hint = Paragraph::new(Line::from(vec![Span::styled(
         hint_text,
         Style::default().fg(Color::DarkGray),
     )]));
-    frame.render_widget(hint, chunks[3]);
+    frame.render_widget(hint, chunks[4]);
 }
 
 fn ui_confirm_modal(frame: &mut Frame, modal: &ConfirmModal) {
@@ -997,6 +1064,7 @@ fn render_message_center(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(paragraph, inner);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_column(
     frame: &mut Frame,
     area: Rect,
@@ -1033,7 +1101,7 @@ fn render_column(
     frame.render_widget(col_block, area);
 
     // Determine content area — if filtering, reserve a line for the search input
-    let (cards_area, filter_area) = if let Some(_) = filter_query {
+    let (cards_area, filter_area) = if filter_query.is_some() {
         let split = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(1), Constraint::Min(0)])
@@ -1071,6 +1139,23 @@ fn render_column(
     } else {
         cards.iter().collect()
     };
+
+    // Render filter input if active
+    if let (Some(area), Some(query)) = (filter_area, filter_query) {
+        let count_text = format!(" {}/{}", visible_cards.len(), cards.len());
+        let input = Paragraph::new(Line::from(vec![
+            Span::styled("/ ", Style::default().fg(Color::Cyan)),
+            Span::styled(
+                query,
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("_", Style::default().fg(Color::Cyan)),
+            Span::styled(count_text, Style::default().fg(Color::DarkGray)),
+        ]));
+        frame.render_widget(input, area);
+    }
 
     let card_height = 4u16;
     let max_visible = (cards_area.height / card_height) as usize;

@@ -8,7 +8,7 @@ use crate::github::{fetch_issues, fetch_prs};
 use crate::hooks::ensure_hook_script;
 use crate::models::{
     AssigneeFilter, Card, ConfigEditState, ConfirmModal, IssueModal, IssueSubmitResult, MessageLog,
-    Mode, RepoSelectState, Screen, SessionStates, StateFilter, MAX_MESSAGES,
+    Mode, RepoSelectState, Screen, SessionStates, StateFilter, WorktreeCreateResult, MAX_MESSAGES,
 };
 use crate::session::{fetch_sessions, Multiplexer};
 
@@ -33,6 +33,8 @@ pub struct App {
     pub pr_state_filter: StateFilter,
     pub pr_assignee_filter: AssigneeFilter,
     pub issue_submit_rx: Option<mpsc::Receiver<IssueSubmitResult>>,
+    pub worktree_create_rx: Option<mpsc::Receiver<WorktreeCreateResult>>,
+    pub loading_message: Option<String>,
     pub spinner_tick: usize,
     pub dependencies: Vec<Dependency>,
     pub config_edit: Option<ConfigEditState>,
@@ -74,6 +76,8 @@ impl App {
             pr_state_filter: StateFilter::Open,
             pr_assignee_filter: AssigneeFilter::All,
             issue_submit_rx: None,
+            worktree_create_rx: None,
+            loading_message: None,
             spinner_tick: 0,
             dependencies: Vec::new(),
             config_edit: None,

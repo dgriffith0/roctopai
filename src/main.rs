@@ -35,7 +35,7 @@ use hooks::start_event_socket;
 use models::{
     ConfigEditState, ConfirmAction, ConfirmModal, IssueModal, IssueSubmitResult, MergeStrategy,
     MessageLog, Mode, RepoSelectPhase, Screen, SessionStates, StateFilter, TextInput,
-    REFRESH_INTERVAL, SOCKET_PATH,
+    WorktreeCreateResult, REFRESH_INTERVAL, SOCKET_PATH,
 };
 use session::{
     create_session_for_worktree, create_worktree_and_session, expand_editor_command,
@@ -68,10 +68,11 @@ fn main() -> Result<()> {
         app.screen = Screen::Dependencies;
     } else {
         app.dependencies = initial_deps;
-        // Load saved config, falling back to detecting the current git repo
+        // Detect the current git repo first, falling back to saved config
+        let detected_repo = detect_current_repo();
         let configured_repo = load_config().map(|c| c.repo).filter(|r| !r.is_empty());
 
-        let repo = configured_repo.or_else(detect_current_repo);
+        let repo = detected_repo.or(configured_repo);
 
         if let Some(repo) = repo {
             app.repo = repo.clone();
@@ -129,7 +130,7 @@ fn main() -> Result<()> {
                         app.issue_modal = None;
                         app.mode = Mode::Normal;
                         match worktree_result {
-                            Ok(()) => {
+                            Some(Ok(())) => {
                                 app.worktrees = fetch_worktrees();
                                 app.sessions = fetch_sessions(&app.session_states, app.multiplexer);
                                 app.clamp_selected();
@@ -138,11 +139,14 @@ fn main() -> Result<()> {
                                     number
                                 ));
                             }
-                            Err(e) => {
+                            Some(Err(e)) => {
                                 app.set_status(format!(
                                     "Created issue #{} but failed to create worktree: {}",
                                     number, e
                                 ));
+                            }
+                            None => {
+                                app.set_status(format!("Created issue #{}", number));
                             }
                         }
                     }
@@ -156,13 +160,50 @@ fn main() -> Result<()> {
             }
         }
 
+        // Check for worktree/session creation results from background thread
+        if let Some(rx) = &app.worktree_create_rx {
+            if let Ok(result) = rx.try_recv() {
+                app.worktree_create_rx = None;
+                app.loading_message = None;
+                match result {
+                    WorktreeCreateResult::WorktreeAndSession { number, result } => match result {
+                        Ok(()) => {
+                            app.worktrees = fetch_worktrees();
+                            app.sessions = fetch_sessions(&app.session_states, app.multiplexer);
+                            app.clamp_selected();
+                            app.last_refresh = std::time::Instant::now();
+                            app.set_status(format!(
+                                "Created worktree and session for issue #{}",
+                                number
+                            ));
+                        }
+                        Err(e) => {
+                            app.set_status(format!("Error: {}", e));
+                        }
+                    },
+                    WorktreeCreateResult::SessionOnly { branch, result } => match result {
+                        Ok(()) => {
+                            app.sessions = fetch_sessions(&app.session_states, app.multiplexer);
+                            app.clamp_selected();
+                            app.last_refresh = std::time::Instant::now();
+                            app.set_status(format!("Created session for '{}'", branch));
+                        }
+                        Err(e) => {
+                            app.set_status(format!("Error: {}", e));
+                        }
+                    },
+                }
+            }
+        }
+
         // Advance spinner tick when submitting
-        if app.issue_submit_rx.is_some() {
+        let has_spinner = app.issue_submit_rx.is_some() || app.worktree_create_rx.is_some();
+        if has_spinner {
             app.spinner_tick = app.spinner_tick.wrapping_add(1);
         }
 
         // Poll for events with a short timeout so the refresh timer updates every second
-        let poll_timeout = if app.issue_submit_rx.is_some() {
+        let poll_timeout = if has_spinner {
             // Fast polling for spinner animation
             Duration::from_millis(100)
         } else if app.screen == Screen::Board && app.mode == Mode::Normal {
@@ -526,7 +567,10 @@ fn main() -> Result<()> {
                                     app.mode = Mode::CreatingIssue;
                                     app.issue_modal = Some(IssueModal::new());
                                 }
-                                KeyCode::Char('w') if app.active_section == 0 => {
+                                KeyCode::Char('w')
+                                    if app.active_section == 0
+                                        && app.worktree_create_rx.is_none() =>
+                                {
                                     if let Some(card) = app.issues.get(app.selected_card[0]) {
                                         // Extract issue number from id "issue-N"
                                         if let Some(num_str) = card.id.strip_prefix("issue-") {
@@ -539,34 +583,33 @@ fn main() -> Result<()> {
                                                 let repo = app.repo.clone();
                                                 let pr_ready = get_pr_ready(&repo);
                                                 let claude_cmd = get_session_command(&repo);
-                                                match create_worktree_and_session(
-                                                    &repo,
-                                                    number,
-                                                    &title,
-                                                    &body,
-                                                    app.hook_script_path.as_deref(),
-                                                    pr_ready,
-                                                    claude_cmd.as_deref(),
-                                                    app.multiplexer,
-                                                ) {
-                                                    Ok(()) => {
-                                                        app.worktrees = fetch_worktrees();
-                                                        app.sessions = fetch_sessions(
-                                                            &app.session_states,
-                                                            app.multiplexer,
-                                                        );
-                                                        app.clamp_selected();
-                                                        app.last_refresh =
-                                                            std::time::Instant::now();
-                                                        app.set_status(format!(
-                                                            "Created worktree and session for issue #{}",
-                                                            number
-                                                        ));
-                                                    }
-                                                    Err(e) => {
-                                                        app.set_status(format!("Error: {}", e));
-                                                    }
-                                                }
+                                                let hook_script = app.hook_script_path.clone();
+                                                let mux = app.multiplexer;
+                                                let (tx, rx) = mpsc::channel();
+                                                app.worktree_create_rx = Some(rx);
+                                                app.loading_message = Some(format!(
+                                                    "Creating worktree and session for issue #{}...",
+                                                    number
+                                                ));
+                                                std::thread::spawn(move || {
+                                                    let result = create_worktree_and_session(
+                                                        &repo,
+                                                        number,
+                                                        &title,
+                                                        &body,
+                                                        hook_script.as_deref(),
+                                                        pr_ready,
+                                                        claude_cmd.as_deref(),
+                                                        mux,
+                                                    )
+                                                    .map_err(|e| e.to_string());
+                                                    let _ = tx.send(
+                                                        WorktreeCreateResult::WorktreeAndSession {
+                                                            number,
+                                                            result,
+                                                        },
+                                                    );
+                                                });
                                             }
                                         }
                                     }
@@ -592,7 +635,10 @@ fn main() -> Result<()> {
                                         }
                                     }
                                 }
-                                KeyCode::Char('w') if app.active_section == 1 => {
+                                KeyCode::Char('w')
+                                    if app.active_section == 1
+                                        && app.worktree_create_rx.is_none() =>
+                                {
                                     if let Some(card) = app.worktrees.get(app.selected_card[1]) {
                                         let branch = card.title.clone();
                                         let worktree_path = card.description.clone();
@@ -608,53 +654,43 @@ fn main() -> Result<()> {
                                                         branch
                                                     ));
                                                 } else {
-                                                    // Fetch issue details from GitHub
                                                     let repo = app.repo.clone();
-                                                    match fetch_issue(&repo, number) {
-                                                        Ok((title, body)) => {
-                                                            let pr_ready = get_pr_ready(&repo);
-                                                            let claude_cmd =
-                                                                get_session_command(&repo);
-                                                            match create_session_for_worktree(
-                                                                &repo,
-                                                                number,
-                                                                &title,
-                                                                &body,
-                                                                &branch,
-                                                                &worktree_path,
-                                                                app.hook_script_path.as_deref(),
-                                                                pr_ready,
-                                                                claude_cmd.as_deref(),
-                                                                app.multiplexer,
-                                                            ) {
-                                                                Ok(()) => {
-                                                                    app.sessions = fetch_sessions(
-                                                                        &app.session_states,
-                                                                        app.multiplexer,
-                                                                    );
-                                                                    app.clamp_selected();
-                                                                    app.last_refresh =
-                                                                        std::time::Instant::now();
-                                                                    app.set_status(format!(
-                                                                        "Created session for '{}'",
-                                                                        branch
-                                                                    ));
-                                                                }
-                                                                Err(e) => {
-                                                                    app.set_status(format!(
-                                                                        "Error: {}",
-                                                                        e
-                                                                    ));
-                                                                }
-                                                            }
-                                                        }
-                                                        Err(e) => {
-                                                            app.set_status(format!(
-                                                                "Failed to fetch issue #{}: {}",
-                                                                number, e
-                                                            ));
-                                                        }
-                                                    }
+                                                    let hook_script = app.hook_script_path.clone();
+                                                    let mux = app.multiplexer;
+                                                    let branch_clone = branch.clone();
+                                                    let (tx, rx) = mpsc::channel();
+                                                    app.worktree_create_rx = Some(rx);
+                                                    app.loading_message = Some(format!(
+                                                        "Creating session for '{}'...",
+                                                        branch
+                                                    ));
+                                                    std::thread::spawn(move || {
+                                                        let result = fetch_issue(&repo, number)
+                                                            .and_then(|(title, body)| {
+                                                                let pr_ready = get_pr_ready(&repo);
+                                                                let claude_cmd =
+                                                                    get_session_command(&repo);
+                                                                create_session_for_worktree(
+                                                                    &repo,
+                                                                    number,
+                                                                    &title,
+                                                                    &body,
+                                                                    &branch_clone,
+                                                                    &worktree_path,
+                                                                    hook_script.as_deref(),
+                                                                    pr_ready,
+                                                                    claude_cmd.as_deref(),
+                                                                    mux,
+                                                                )
+                                                            })
+                                                            .map_err(|e| e.to_string());
+                                                        let _ = tx.send(
+                                                            WorktreeCreateResult::SessionOnly {
+                                                                branch: branch_clone,
+                                                                result,
+                                                            },
+                                                        );
+                                                    });
                                                 }
                                             }
                                         } else {
@@ -1197,11 +1233,20 @@ fn main() -> Result<()> {
                                         app.mode = Mode::Normal;
                                     }
                                     KeyCode::Tab => {
-                                        modal.active_field =
-                                            if modal.active_field == 0 { 1 } else { 0 };
+                                        modal.active_field = match modal.active_field {
+                                            0 => 1,
+                                            1 => 2,
+                                            _ => 0,
+                                        };
                                     }
                                     KeyCode::Enter if modal.active_field == 0 => {
                                         modal.active_field = 1;
+                                    }
+                                    KeyCode::Char(' ') if modal.active_field == 2 => {
+                                        modal.create_worktree = !modal.create_worktree;
+                                    }
+                                    KeyCode::Enter if modal.active_field == 2 => {
+                                        modal.create_worktree = !modal.create_worktree;
                                     }
                                     KeyCode::Char('s')
                                         if key.modifiers.contains(KeyModifiers::CONTROL)
@@ -1218,14 +1263,15 @@ fn main() -> Result<()> {
                                             let hook_script = app.hook_script_path.clone();
                                             let claude_cmd = get_session_command(&repo);
                                             let mux = app.multiplexer;
+                                            let create_worktree = modal.create_worktree;
                                             let (tx, rx) = mpsc::channel();
                                             app.issue_submit_rx = Some(rx);
                                             std::thread::spawn(move || {
                                                 match create_issue(&repo, &title, &body) {
                                                     Ok(number) => {
-                                                        let pr_ready = get_pr_ready(&repo);
-                                                        let worktree_result =
-                                                            create_worktree_and_session(
+                                                        let worktree_result = if create_worktree {
+                                                            let pr_ready = get_pr_ready(&repo);
+                                                            Some(create_worktree_and_session(
                                                                 &repo,
                                                                 number,
                                                                 &title,
@@ -1234,7 +1280,10 @@ fn main() -> Result<()> {
                                                                 pr_ready,
                                                                 claude_cmd.as_deref(),
                                                                 mux,
-                                                            );
+                                                            ))
+                                                        } else {
+                                                            None
+                                                        };
                                                         let _ =
                                                             tx.send(IssueSubmitResult::Success {
                                                                 number,
@@ -1284,7 +1333,7 @@ fn main() -> Result<()> {
                                             modal.body.move_end();
                                         }
                                     }
-                                    KeyCode::Char(c) => {
+                                    KeyCode::Char(c) if modal.active_field != 2 => {
                                         if modal.active_field == 0 {
                                             modal.title.insert(c);
                                         } else {
