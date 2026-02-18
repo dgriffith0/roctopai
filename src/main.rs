@@ -130,7 +130,7 @@ fn main() -> Result<()> {
                         app.issue_modal = None;
                         app.mode = Mode::Normal;
                         match worktree_result {
-                            Ok(()) => {
+                            Some(Ok(())) => {
                                 app.worktrees = fetch_worktrees();
                                 app.sessions = fetch_sessions(&app.session_states, app.multiplexer);
                                 app.clamp_selected();
@@ -139,11 +139,14 @@ fn main() -> Result<()> {
                                     number
                                 ));
                             }
-                            Err(e) => {
+                            Some(Err(e)) => {
                                 app.set_status(format!(
                                     "Created issue #{} but failed to create worktree: {}",
                                     number, e
                                 ));
+                            }
+                            None => {
+                                app.set_status(format!("Created issue #{}", number));
                             }
                         }
                     }
@@ -1212,11 +1215,20 @@ fn main() -> Result<()> {
                                         app.mode = Mode::Normal;
                                     }
                                     KeyCode::Tab => {
-                                        modal.active_field =
-                                            if modal.active_field == 0 { 1 } else { 0 };
+                                        modal.active_field = match modal.active_field {
+                                            0 => 1,
+                                            1 => 2,
+                                            _ => 0,
+                                        };
                                     }
                                     KeyCode::Enter if modal.active_field == 0 => {
                                         modal.active_field = 1;
+                                    }
+                                    KeyCode::Char(' ') if modal.active_field == 2 => {
+                                        modal.create_worktree = !modal.create_worktree;
+                                    }
+                                    KeyCode::Enter if modal.active_field == 2 => {
+                                        modal.create_worktree = !modal.create_worktree;
                                     }
                                     KeyCode::Char('s')
                                         if key.modifiers.contains(KeyModifiers::CONTROL)
@@ -1233,14 +1245,15 @@ fn main() -> Result<()> {
                                             let hook_script = app.hook_script_path.clone();
                                             let claude_cmd = get_session_command(&repo);
                                             let mux = app.multiplexer;
+                                            let create_worktree = modal.create_worktree;
                                             let (tx, rx) = mpsc::channel();
                                             app.issue_submit_rx = Some(rx);
                                             std::thread::spawn(move || {
                                                 match create_issue(&repo, &title, &body) {
                                                     Ok(number) => {
-                                                        let pr_ready = get_pr_ready(&repo);
-                                                        let worktree_result =
-                                                            create_worktree_and_session(
+                                                        let worktree_result = if create_worktree {
+                                                            let pr_ready = get_pr_ready(&repo);
+                                                            Some(create_worktree_and_session(
                                                                 &repo,
                                                                 number,
                                                                 &title,
@@ -1249,7 +1262,10 @@ fn main() -> Result<()> {
                                                                 pr_ready,
                                                                 claude_cmd.as_deref(),
                                                                 mux,
-                                                            );
+                                                            ))
+                                                        } else {
+                                                            None
+                                                        };
                                                         let _ =
                                                             tx.send(IssueSubmitResult::Success {
                                                                 number,
@@ -1299,7 +1315,7 @@ fn main() -> Result<()> {
                                             modal.body.move_end();
                                         }
                                     }
-                                    KeyCode::Char(c) => {
+                                    KeyCode::Char(c) if modal.active_field != 2 => {
                                         if modal.active_field == 0 {
                                             modal.title.insert(c);
                                         } else {
