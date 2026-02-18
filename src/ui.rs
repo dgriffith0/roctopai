@@ -13,8 +13,8 @@ use crate::app::App;
 use crate::config::config_path;
 use crate::deps::Dependency;
 use crate::models::{
-    card_matches, AiSetupState, Card, ConfirmModal, IssueModal, Mode, RepoSelectPhase,
-    RepoSelectState, StateFilter, TextInput, REFRESH_INTERVAL,
+    card_matches, AiSetupState, Card, ConfirmModal, EditIssueModal, IssueModal, Mode,
+    RepoSelectPhase, RepoSelectState, StateFilter, TextInput, REFRESH_INTERVAL,
 };
 use crate::session::{
     default_editor_command, COMMAND_SHORTCUTS, DEFAULT_CLAUDE_COMMAND, DEFAULT_EDITOR_COMMAND,
@@ -680,7 +680,7 @@ pub fn ui(frame: &mut Frame, app: &App) {
             Span::styled(" j/k ↑/↓ ", key_style),
             Span::styled(" Navigate ", desc_style),
         ],
-        Mode::CreatingIssue => vec![
+        Mode::CreatingIssue | Mode::EditingIssue => vec![
             Span::styled(" Esc ", key_style),
             Span::styled(" Cancel ", desc_style),
             Span::styled(" Tab ", key_style),
@@ -725,6 +725,8 @@ pub fn ui(frame: &mut Frame, app: &App) {
             0 => {
                 area_spans.push(Span::styled(" w ", key_accent));
                 area_spans.push(Span::styled(" Worktree+Session ", desc_style));
+                area_spans.push(Span::styled(" e ", key_accent));
+                area_spans.push(Span::styled(" Edit issue ", desc_style));
                 if app.issue_state_filter == StateFilter::Open {
                     area_spans.push(Span::styled(" d ", key_style));
                     area_spans.push(Span::styled(" Close issue ", desc_style));
@@ -807,6 +809,11 @@ pub fn ui(frame: &mut Frame, app: &App) {
     // Render issue modal overlay if open
     if let Some(modal) = &app.issue_modal {
         ui_issue_modal(frame, modal, app.spinner_tick);
+    }
+
+    // Render edit issue modal overlay if open
+    if let Some(modal) = &app.edit_issue_modal {
+        ui_edit_issue_modal(frame, modal, app.spinner_tick);
     }
 
     // Render confirm modal overlay if open
@@ -1055,6 +1062,145 @@ fn ui_issue_modal(frame: &mut Frame, modal: &IssueModal, spinner_tick: usize) {
         Style::default().fg(Color::DarkGray),
     )]));
     frame.render_widget(hint, chunks[4]);
+}
+
+fn ui_edit_issue_modal(frame: &mut Frame, modal: &EditIssueModal, spinner_tick: usize) {
+    let area = centered_rect(50, 50, frame.area());
+
+    frame.render_widget(Clear, area);
+
+    let outer_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(format!(" Edit Issue #{} ", modal.number))
+        .title_style(
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
+        .padding(Padding::new(1, 1, 1, 0));
+    let inner = outer_block.inner(area);
+    frame.render_widget(outer_block, area);
+
+    let has_error = modal.error.is_some();
+    let has_status = has_error || modal.submitting;
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),                              // title input
+            Constraint::Min(3),                                 // body input
+            Constraint::Length(if has_status { 1 } else { 0 }), // error or spinner
+            Constraint::Length(1),                              // hint
+        ])
+        .split(inner);
+
+    // Title field
+    let title_style = if modal.submitting {
+        Style::default().fg(Color::DarkGray)
+    } else if modal.active_field == 0 {
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let title_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(title_style)
+        .title(" Title ");
+    let text_color = if modal.submitting {
+        Color::DarkGray
+    } else {
+        Color::White
+    };
+    let show_title_cursor = modal.active_field == 0 && !modal.submitting;
+    let title_text = Paragraph::new(Line::from(text_input_spans(
+        &modal.title,
+        Style::default().fg(text_color),
+        Style::default().fg(Color::Black).bg(Color::Cyan),
+        show_title_cursor,
+    )))
+    .block(title_block);
+    frame.render_widget(title_text, chunks[0]);
+
+    // Body field
+    let body_style = if modal.submitting {
+        Style::default().fg(Color::DarkGray)
+    } else if modal.active_field == 1 {
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let body_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(body_style)
+        .title(" Body ");
+    let show_body_cursor = modal.active_field == 1 && !modal.submitting;
+    let body_spans = text_input_spans(
+        &modal.body,
+        Style::default().fg(text_color),
+        Style::default().fg(Color::Black).bg(Color::Cyan),
+        show_body_cursor,
+    );
+    let mut lines: Vec<Line> = vec![Line::from(vec![])];
+    for span in body_spans {
+        let content = span.content.to_string();
+        let parts: Vec<&str> = content.split('\n').collect();
+        for (i, part) in parts.iter().enumerate() {
+            if i > 0 {
+                lines.push(Line::from(vec![]));
+            }
+            if !part.is_empty() {
+                let last = lines.last_mut().unwrap();
+                last.spans.push(Span::styled(part.to_string(), span.style));
+            }
+        }
+    }
+    let body_paragraph = Paragraph::new(Text::from(lines))
+        .block(body_block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(body_paragraph, chunks[1]);
+
+    // Spinner or error
+    if modal.submitting {
+        let spinner = SPINNER_FRAMES[spinner_tick % SPINNER_FRAMES.len()];
+        let spinner_text = Paragraph::new(Line::from(vec![
+            Span::styled(
+                format!("{} ", spinner),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Updating issue...",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        frame.render_widget(spinner_text, chunks[2]);
+    } else if let Some(err) = &modal.error {
+        let err_text = Paragraph::new(Line::from(vec![Span::styled(
+            err.as_str(),
+            Style::default().fg(Color::Red),
+        )]));
+        frame.render_widget(err_text, chunks[2]);
+    }
+
+    // Hint
+    let hint_text = if modal.submitting {
+        "Esc: cancel"
+    } else {
+        "Tab: switch field | Ctrl+S: submit | Esc: cancel"
+    };
+    let hint = Paragraph::new(Line::from(vec![Span::styled(
+        hint_text,
+        Style::default().fg(Color::DarkGray),
+    )]));
+    frame.render_widget(hint, chunks[3]);
 }
 
 fn ui_confirm_modal(frame: &mut Frame, modal: &ConfirmModal) {

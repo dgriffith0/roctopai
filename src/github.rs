@@ -273,6 +273,35 @@ pub fn fetch_issue(repo: &str, number: u64) -> std::result::Result<(String, Stri
     Ok((title, body))
 }
 
+pub fn edit_issue(
+    repo: &str,
+    number: u64,
+    title: &str,
+    body: &str,
+) -> std::result::Result<(), String> {
+    let output = Command::new("gh")
+        .args([
+            "issue",
+            "edit",
+            &number.to_string(),
+            "--repo",
+            repo,
+            "--title",
+            title,
+            "--body",
+            body,
+        ])
+        .output()
+        .map_err(|e| format!("Failed to run gh: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("gh error: {}", stderr.trim()));
+    }
+
+    Ok(())
+}
+
 pub fn close_issue(repo: &str, number: u64) -> std::result::Result<(), String> {
     let output = Command::new("gh")
         .args(["issue", "close", "--repo", repo, &number.to_string()])

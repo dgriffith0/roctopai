@@ -119,6 +119,7 @@ pub enum Mode {
     Normal,
     Filtering { query: TextInput, focused: bool },
     CreatingIssue,
+    EditingIssue,
     Confirming,
     EditingVerifyCommand { input: TextInput },
     EditingEditorCommand { input: TextInput },
@@ -252,6 +253,33 @@ pub enum IssueSubmitResult {
         number: u64,
         worktree_result: Option<std::result::Result<(), String>>,
     },
+    Error(String),
+}
+
+pub struct EditIssueModal {
+    pub number: u64,
+    pub title: TextInput,
+    pub body: TextInput,
+    pub active_field: usize, // 0 = title, 1 = body
+    pub error: Option<String>,
+    pub submitting: bool,
+}
+
+impl EditIssueModal {
+    pub fn new(number: u64, title: String, body: String) -> Self {
+        Self {
+            number,
+            title: TextInput::from(title),
+            body: TextInput::from(body),
+            active_field: 0,
+            error: None,
+            submitting: false,
+        }
+    }
+}
+
+pub enum IssueEditResult {
+    Success { number: u64 },
     Error(String),
 }
 

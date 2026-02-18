@@ -30,12 +30,14 @@ use config::{
 };
 use deps::{check_dependencies, detect_ai_tools, has_missing_required};
 use git::{detect_current_repo, fetch_worktrees, pull_main, remove_worktree};
-use github::{close_issue, create_issue, fetch_issue, fetch_issues, fetch_prs, fetch_repos};
+use github::{
+    close_issue, create_issue, edit_issue, fetch_issue, fetch_issues, fetch_prs, fetch_repos,
+};
 use hooks::start_event_socket;
 use models::{
-    AiSetupState, ConfigEditState, ConfirmAction, ConfirmModal, IssueModal, IssueSubmitResult,
-    MergeStrategy, MessageLog, Mode, RepoSelectPhase, Screen, SessionStates, StateFilter,
-    TextInput, WorktreeCreateResult, REFRESH_INTERVAL, SOCKET_PATH,
+    AiSetupState, ConfigEditState, ConfirmAction, ConfirmModal, EditIssueModal, IssueEditResult,
+    IssueModal, IssueSubmitResult, MergeStrategy, MessageLog, Mode, RepoSelectPhase, Screen,
+    SessionStates, StateFilter, TextInput, WorktreeCreateResult, REFRESH_INTERVAL, SOCKET_PATH,
 };
 use session::{
     create_session_for_worktree, create_worktree_and_session, expand_editor_command,
@@ -192,6 +194,33 @@ fn main() -> Result<()> {
             }
         }
 
+        // Check for issue edit results from background thread
+        if let Some(rx) = &app.issue_edit_rx {
+            if let Ok(result) = rx.try_recv() {
+                app.issue_edit_rx = None;
+                match result {
+                    IssueEditResult::Success { number } => {
+                        app.issues = fetch_issues(
+                            &app.repo,
+                            app.issue_state_filter,
+                            app.issue_assignee_filter,
+                        );
+                        app.clamp_selected();
+                        app.last_refresh = std::time::Instant::now();
+                        app.edit_issue_modal = None;
+                        app.mode = Mode::Normal;
+                        app.set_status(format!("Updated issue #{}", number));
+                    }
+                    IssueEditResult::Error(e) => {
+                        if let Some(modal) = &mut app.edit_issue_modal {
+                            modal.submitting = false;
+                            modal.error = Some(e);
+                        }
+                    }
+                }
+            }
+        }
+
         // Check for worktree/session creation results from background thread
         if let Some(rx) = &app.worktree_create_rx {
             if let Ok(result) = rx.try_recv() {
@@ -229,7 +258,9 @@ fn main() -> Result<()> {
         }
 
         // Advance spinner tick when submitting
-        let has_spinner = app.issue_submit_rx.is_some() || app.worktree_create_rx.is_some();
+        let has_spinner = app.issue_submit_rx.is_some()
+            || app.issue_edit_rx.is_some()
+            || app.worktree_create_rx.is_some();
         if has_spinner {
             app.spinner_tick = app.spinner_tick.wrapping_add(1);
         }
@@ -718,6 +749,27 @@ fn main() -> Result<()> {
                                                     },
                                                 });
                                                 app.mode = Mode::Confirming;
+                                            }
+                                        }
+                                    }
+                                }
+                                KeyCode::Char('e') if app.active_section == 0 => {
+                                    if let Some(card) = app.issues.get(app.selected_card[0]) {
+                                        if let Some(num_str) = card.id.strip_prefix("issue-") {
+                                            if let Ok(number) = num_str.parse::<u64>() {
+                                                // Extract title without the "#N " prefix
+                                                let title = card
+                                                    .title
+                                                    .strip_prefix(&format!("#{} ", number))
+                                                    .unwrap_or(&card.title)
+                                                    .to_string();
+                                                let body = card
+                                                    .full_description
+                                                    .clone()
+                                                    .unwrap_or_default();
+                                                app.edit_issue_modal =
+                                                    Some(EditIssueModal::new(number, title, body));
+                                                app.mode = Mode::EditingIssue;
                                             }
                                         }
                                     }
@@ -1482,6 +1534,102 @@ fn main() -> Result<()> {
                             }
                             _ => {}
                         },
+                        Mode::EditingIssue => {
+                            if let Some(modal) = &mut app.edit_issue_modal {
+                                if modal.submitting && key.code != KeyCode::Esc {
+                                    continue;
+                                }
+                                match key.code {
+                                    KeyCode::Esc => {
+                                        app.issue_edit_rx = None;
+                                        app.edit_issue_modal = None;
+                                        app.mode = Mode::Normal;
+                                    }
+                                    KeyCode::Tab => {
+                                        modal.active_field =
+                                            if modal.active_field == 0 { 1 } else { 0 };
+                                    }
+                                    KeyCode::Enter if modal.active_field == 0 => {
+                                        modal.active_field = 1;
+                                    }
+                                    KeyCode::Char('s')
+                                        if key.modifiers.contains(KeyModifiers::CONTROL)
+                                            && !modal.submitting =>
+                                    {
+                                        let title = modal.title.value().trim().to_string();
+                                        if title.is_empty() {
+                                            modal.error = Some("Title cannot be empty".to_string());
+                                        } else {
+                                            modal.submitting = true;
+                                            modal.error = None;
+                                            let body = modal.body.value().to_string();
+                                            let repo = app.repo.clone();
+                                            let number = modal.number;
+                                            let (tx, rx) = mpsc::channel();
+                                            app.issue_edit_rx = Some(rx);
+                                            std::thread::spawn(move || {
+                                                match edit_issue(&repo, number, &title, &body) {
+                                                    Ok(()) => {
+                                                        let _ = tx.send(IssueEditResult::Success {
+                                                            number,
+                                                        });
+                                                    }
+                                                    Err(e) => {
+                                                        let _ = tx.send(IssueEditResult::Error(e));
+                                                    }
+                                                }
+                                            });
+                                        }
+                                    }
+                                    KeyCode::Backspace => {
+                                        if modal.active_field == 0 {
+                                            modal.title.delete_back();
+                                        } else {
+                                            modal.body.delete_back();
+                                        }
+                                    }
+                                    KeyCode::Left => {
+                                        if modal.active_field == 0 {
+                                            modal.title.move_left();
+                                        } else {
+                                            modal.body.move_left();
+                                        }
+                                    }
+                                    KeyCode::Right => {
+                                        if modal.active_field == 0 {
+                                            modal.title.move_right();
+                                        } else {
+                                            modal.body.move_right();
+                                        }
+                                    }
+                                    KeyCode::Home => {
+                                        if modal.active_field == 0 {
+                                            modal.title.move_home();
+                                        } else {
+                                            modal.body.move_home();
+                                        }
+                                    }
+                                    KeyCode::End => {
+                                        if modal.active_field == 0 {
+                                            modal.title.move_end();
+                                        } else {
+                                            modal.body.move_end();
+                                        }
+                                    }
+                                    KeyCode::Char(c) => {
+                                        if modal.active_field == 0 {
+                                            modal.title.insert(c);
+                                        } else {
+                                            modal.body.insert(c);
+                                        }
+                                    }
+                                    KeyCode::Enter if modal.active_field == 1 => {
+                                        modal.body.insert('\n');
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
                         Mode::EditingEditorCommand { input } => match key.code {
                             KeyCode::Esc => {
                                 app.mode = Mode::Normal;
