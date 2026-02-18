@@ -3,8 +3,8 @@ name = "octopai"
 version = "0.1.0"
 edition = "2021"
 description = "AI-powered CLI assistant for managing multiple projects"
-homepage = "https://github.com/dgriffith0/roctopai"
-repository = "https://github.com/dgriffith0/roctopai"
+homepage = "https://github.com/dgriffith0/octopai"
+repository = "https://github.com/dgriffith0/octopai"
 
 [dependencies]
 ratatui = "0.28"
