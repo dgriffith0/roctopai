@@ -26,7 +26,12 @@
       "Bash(pgrep:*)",
       "Bash(tmux capture-pane:*)",
       "Bash(nc:*)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(wc:*)",
+      "Bash(git pull:*)",
+      "Bash(git checkout:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr:*)"
     ]
   }
 }
