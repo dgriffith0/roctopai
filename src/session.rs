@@ -288,7 +288,7 @@ pub fn fetch_sessions(socket_states: &SessionStates, mux: Multiplexer) -> Vec<Ca
 
 /// Default command template for Claude Code sessions.
 pub const DEFAULT_CLAUDE_COMMAND: &str =
-    "claude \"$(cat '{prompt_file}')\" --allowedTools Read,Edit,Bash";
+    "claude \"$(cat '{prompt_file}')\" --allowedTools Read,Edit,Bash --max-turns 50";
 
 /// Default command template for Cursor sessions.
 pub const DEFAULT_CURSOR_COMMAND: &str = "cursor-agent \"$(cat '{prompt_file}')\"";

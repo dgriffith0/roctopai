@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc;
 use std::time::Instant;
 
@@ -44,6 +44,9 @@ pub struct App {
     pub pending_refresh: Option<Instant>,
     pub main_behind_count: usize,
     pub multiplexer: Multiplexer,
+    /// Tracks sessions that have been nudged to continue (to avoid repeated nudges).
+    /// Maps branch name to the number of nudges sent.
+    pub nudged_sessions: HashMap<String, usize>,
 }
 
 impl App {
@@ -87,6 +90,7 @@ impl App {
             pending_refresh: None,
             main_behind_count: 0,
             multiplexer,
+            nudged_sessions: HashMap::new(),
         }
     }
 
@@ -201,6 +205,42 @@ impl App {
 
         self.sessions = fetch_sessions(&self.session_states, self.multiplexer);
         self.main_behind_count = fetch_main_behind_count();
+
+        // Auto-nudge idle sessions that have no associated PR.
+        // Only nudge once per session to avoid spamming.
+        let max_nudges = 1;
+        for session in &self.sessions {
+            if session.tag != "idle" {
+                continue;
+            }
+            let branch = &session.title; // e.g. "issue-42"
+            let has_pr = self
+                .pull_requests
+                .iter()
+                .any(|pr| pr.head_branch.as_deref() == Some(branch));
+            if has_pr {
+                // PR exists — clear any nudge tracking for this session
+                self.nudged_sessions.remove(branch);
+                continue;
+            }
+            let nudge_count = self.nudged_sessions.entry(branch.clone()).or_insert(0);
+            if *nudge_count >= max_nudges {
+                continue;
+            }
+            *nudge_count += 1;
+            self.multiplexer.send_keys(branch, "continue");
+            self.add_message(&format!(
+                "[monitor] Nudged {} to continue (no PR found)",
+                branch
+            ));
+        }
+
+        // Clean up nudge tracking for sessions that no longer exist
+        let active_branches: HashSet<String> =
+            self.sessions.iter().map(|s| s.title.clone()).collect();
+        self.nudged_sessions
+            .retain(|k, _| active_branches.contains(k));
+
         self.clamp_selected();
         self.last_refresh = Instant::now();
     }
