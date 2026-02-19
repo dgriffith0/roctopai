@@ -6,7 +6,6 @@ use crate::deps::Dependency;
 use crate::git::{cleanup_merged_worktrees, fetch_main_behind_count, fetch_worktrees};
 use crate::github::{fetch_issues, fetch_prs};
 use crate::hooks::ensure_hook_script;
-use crate::local_issues::fetch_local_issues;
 use crate::models::{
     AiSetupState, AssigneeFilter, Card, ConfigEditState, ConfirmModal, EditIssueModal,
     IssueEditResult, IssueModal, IssueSubmitResult, MessageLog, Mode, RepoSelectState, Screen,
@@ -195,14 +194,11 @@ impl App {
     }
 
     pub fn refresh_data(&mut self) {
-        let mut issues = fetch_issues(
+        self.issues = fetch_issues(
             &self.repo,
             self.issue_state_filter,
             self.issue_assignee_filter,
         );
-        let local = fetch_local_issues(&self.repo, self.issue_state_filter.label());
-        issues.extend(local);
-        self.issues = issues;
         self.pull_requests = fetch_prs(&self.repo, self.pr_state_filter, self.pr_assignee_filter);
         self.worktrees = fetch_worktrees();
 

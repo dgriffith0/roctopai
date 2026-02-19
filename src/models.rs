@@ -24,7 +24,6 @@ pub struct Card {
     pub is_draft: Option<bool>,
     pub is_merged: Option<bool>,
     pub head_branch: Option<String>,
-    pub is_local: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -92,9 +91,6 @@ impl MergeStrategy {
 pub enum ConfirmAction {
     CloseIssue {
         number: u64,
-    },
-    CloseLocalIssue {
-        id: u64,
     },
     RemoveWorktree {
         path: String,
@@ -233,11 +229,10 @@ impl RepoSelectState {
 pub struct IssueModal {
     pub title: TextInput,
     pub body: TextInput,
-    pub active_field: usize, // 0 = title, 1 = body, 2 = create_worktree toggle, 3 = local_only toggle
+    pub active_field: usize, // 0 = title, 1 = body, 2 = create_worktree toggle
     pub error: Option<String>,
     pub submitting: bool,
     pub create_worktree: bool,
-    pub local_only: bool,
 }
 
 impl IssueModal {
@@ -249,7 +244,6 @@ impl IssueModal {
             error: None,
             submitting: false,
             create_worktree: true,
-            local_only: false,
         }
     }
 }
@@ -269,7 +263,6 @@ pub struct EditIssueModal {
     pub active_field: usize, // 0 = title, 1 = body
     pub error: Option<String>,
     pub submitting: bool,
-    pub is_local: bool,
 }
 
 impl EditIssueModal {
@@ -281,19 +274,6 @@ impl EditIssueModal {
             active_field: 0,
             error: None,
             submitting: false,
-            is_local: false,
-        }
-    }
-
-    pub fn new_local(id: u64, title: String, body: String) -> Self {
-        Self {
-            number: id,
-            title: TextInput::from(title),
-            body: TextInput::from(body),
-            active_field: 0,
-            error: None,
-            submitting: false,
-            is_local: true,
         }
     }
 }

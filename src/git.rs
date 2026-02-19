@@ -105,7 +105,6 @@ pub fn fetch_worktrees() -> Vec<Card> {
             is_draft: None,
             is_merged: None,
             head_branch: None,
-            is_local: false,
         });
     }
 
