@@ -4,6 +4,7 @@ mod deps;
 mod git;
 mod github;
 mod hooks;
+mod local;
 mod models;
 mod session;
 mod ui;
@@ -28,11 +29,9 @@ use config::{
     get_auto_open_pr, get_editor_command, get_multiplexer, get_pr_ready, get_session_command,
     get_verify_command, load_config, save_config, set_editor_command, set_verify_command,
 };
-use deps::{check_dependencies, detect_ai_tools, has_missing_required};
-use git::{detect_current_repo, fetch_worktrees, pull_main, remove_worktree};
-use github::{
-    close_issue, create_issue, edit_issue, fetch_issue, fetch_issues, fetch_prs, fetch_repos,
-};
+use deps::{check_dependencies, detect_ai_tools, gh_available, has_missing_required};
+use git::{detect_current_repo, detect_repo_from_git, fetch_worktrees, pull_main, remove_worktree};
+use github::{close_issue, create_issue, edit_issue, fetch_issue, fetch_prs, fetch_repos};
 use hooks::start_event_socket;
 use models::{
     AiSetupState, ConfigEditState, ConfirmAction, ConfirmModal, EditIssueModal, IssueEditResult,
@@ -62,6 +61,11 @@ fn main() -> Result<()> {
         .or_else(Multiplexer::detect)
         .unwrap_or(Multiplexer::Tmux);
     let mut app = App::new(session_states, message_log, multiplexer);
+
+    // Determine local mode: forced if gh is not available, otherwise from config
+    let has_gh = gh_available();
+    let config_local_mode = config::get_local_mode();
+    app.local_mode = !has_gh || config_local_mode;
 
     // Check external dependencies on startup
     let initial_deps = check_dependencies();
@@ -97,7 +101,11 @@ fn main() -> Result<()> {
 
         // If not showing AI setup, proceed to detect repo and enter board
         if app.screen != Screen::AiSetup {
-            let detected_repo = detect_current_repo();
+            let detected_repo = if app.local_mode {
+                detect_repo_from_git()
+            } else {
+                detect_current_repo().or_else(detect_repo_from_git)
+            };
             let configured_repo = load_config().map(|c| c.repo).filter(|r| !r.is_empty());
 
             let repo = detected_repo.or(configured_repo);
@@ -114,7 +122,7 @@ fn main() -> Result<()> {
 
     loop {
         terminal.draw(|frame| match app.screen {
-            Screen::RepoSelect => ui_repo_select(frame, &app.repo_select),
+            Screen::RepoSelect => ui_repo_select(frame, &app.repo_select, app.local_mode),
             Screen::Board => ui(frame, &app),
             Screen::Dependencies => ui_dependencies(frame, &app.dependencies),
             Screen::Configuration => ui_configuration(frame, &app),
@@ -154,15 +162,9 @@ fn main() -> Result<()> {
                         worktree_result,
                         ..
                     } => {
-                        app.issues = fetch_issues(
-                            &app.repo,
-                            app.issue_state_filter,
-                            app.issue_assignee_filter,
-                        );
-                        app.clamp_selected();
-                        app.last_refresh = std::time::Instant::now();
                         app.issue_modal = None;
                         app.mode = Mode::Normal;
+                        app.refresh_data();
                         match worktree_result {
                             Some(Ok(())) => {
                                 app.worktrees = fetch_worktrees();
@@ -200,15 +202,9 @@ fn main() -> Result<()> {
                 app.issue_edit_rx = None;
                 match result {
                     IssueEditResult::Success { number } => {
-                        app.issues = fetch_issues(
-                            &app.repo,
-                            app.issue_state_filter,
-                            app.issue_assignee_filter,
-                        );
-                        app.clamp_selected();
-                        app.last_refresh = std::time::Instant::now();
                         app.edit_issue_modal = None;
                         app.mode = Mode::Normal;
+                        app.refresh_data();
                         app.set_status(format!("Updated issue #{}", number));
                     }
                     IssueEditResult::Error(e) => {
@@ -485,18 +481,33 @@ fn main() -> Result<()> {
                                 }
                             }
                             KeyCode::Enter => {
-                                let owner = app.repo_select.input.value().trim().to_string();
-                                if owner.is_empty() {
-                                    app.repo_select.error =
-                                        Some("Please enter an org or user name".into());
+                                let input_val = app.repo_select.input.value().trim().to_string();
+                                if input_val.is_empty() {
+                                    app.repo_select.error = Some(if app.local_mode {
+                                        "Please enter owner/repo (e.g. user/my-project)".into()
+                                    } else {
+                                        "Please enter an org or user name".into()
+                                    });
+                                } else if app.local_mode {
+                                    // In local mode, accept "owner/repo" directly
+                                    if input_val.contains('/') {
+                                        app.repo = input_val;
+                                        app.screen = Screen::Board;
+                                        app.refresh_data();
+                                    } else {
+                                        app.repo_select.error = Some(
+                                            "In local mode, enter full owner/repo (e.g. user/my-project)".into(),
+                                        );
+                                    }
                                 } else {
                                     app.repo_select.error = None;
                                     app.repo_select.phase = RepoSelectPhase::Loading;
                                     // We need to redraw to show loading state, then fetch
-                                    terminal
-                                        .draw(|frame| ui_repo_select(frame, &app.repo_select))?;
+                                    terminal.draw(|frame| {
+                                        ui_repo_select(frame, &app.repo_select, app.local_mode)
+                                    })?;
 
-                                    match fetch_repos(&owner) {
+                                    match fetch_repos(&input_val) {
                                         Ok(repos) => {
                                             app.repo_select.repos = repos;
                                             app.repo_select.filter_query.clear();
@@ -702,6 +713,7 @@ fn main() -> Result<()> {
                                                 let claude_cmd = get_session_command(&repo);
                                                 let hook_script = app.hook_script_path.clone();
                                                 let mux = app.multiplexer;
+                                                let is_local = app.local_mode;
                                                 let (tx, rx) = mpsc::channel();
                                                 app.worktree_create_rx = Some(rx);
                                                 app.loading_message = Some(format!(
@@ -719,6 +731,7 @@ fn main() -> Result<()> {
                                                         auto_open_pr,
                                                         claude_cmd.as_deref(),
                                                         mux,
+                                                        is_local,
                                                     )
                                                     .map_err(|e| e.to_string());
                                                     let _ = tx.send(
@@ -797,6 +810,7 @@ fn main() -> Result<()> {
                                                     let hook_script = app.hook_script_path.clone();
                                                     let mux = app.multiplexer;
                                                     let branch_clone = branch.clone();
+                                                    let is_local = app.local_mode;
                                                     let (tx, rx) = mpsc::channel();
                                                     app.worktree_create_rx = Some(rx);
                                                     app.loading_message = Some(format!(
@@ -804,28 +818,33 @@ fn main() -> Result<()> {
                                                         branch
                                                     ));
                                                     std::thread::spawn(move || {
-                                                        let result = fetch_issue(&repo, number)
-                                                            .and_then(|(title, body)| {
-                                                                let pr_ready = get_pr_ready(&repo);
-                                                                let auto_open_pr =
-                                                                    get_auto_open_pr(&repo);
-                                                                let claude_cmd =
-                                                                    get_session_command(&repo);
-                                                                create_session_for_worktree(
-                                                                    &repo,
-                                                                    number,
-                                                                    &title,
-                                                                    &body,
-                                                                    &branch_clone,
-                                                                    &worktree_path,
-                                                                    hook_script.as_deref(),
-                                                                    pr_ready,
-                                                                    auto_open_pr,
-                                                                    claude_cmd.as_deref(),
-                                                                    mux,
-                                                                )
-                                                            })
-                                                            .map_err(|e| e.to_string());
+                                                        let result = if is_local {
+                                                            local::fetch_local_issue(&repo, number)
+                                                        } else {
+                                                            fetch_issue(&repo, number)
+                                                        }
+                                                        .and_then(|(title, body)| {
+                                                            let pr_ready = get_pr_ready(&repo);
+                                                            let auto_open_pr =
+                                                                get_auto_open_pr(&repo);
+                                                            let claude_cmd =
+                                                                get_session_command(&repo);
+                                                            create_session_for_worktree(
+                                                                &repo,
+                                                                number,
+                                                                &title,
+                                                                &body,
+                                                                &branch_clone,
+                                                                &worktree_path,
+                                                                hook_script.as_deref(),
+                                                                pr_ready,
+                                                                auto_open_pr,
+                                                                claude_cmd.as_deref(),
+                                                                mux,
+                                                                is_local,
+                                                            )
+                                                        })
+                                                        .map_err(|e| e.to_string());
                                                         let _ = tx.send(
                                                             WorktreeCreateResult::SessionOnly {
                                                                 branch: branch_clone,
@@ -924,6 +943,52 @@ fn main() -> Result<()> {
                                         }
                                     }
                                 }
+                                // Create a local PR from a worktree (local mode only)
+                                KeyCode::Char('P') if app.active_section == 1 && app.local_mode => {
+                                    if let Some(card) = app.worktrees.get(app.selected_card[1]) {
+                                        let branch = card.title.clone();
+                                        let repo = app.repo.clone();
+                                        if local::has_local_pr_for_branch(&repo, &branch) {
+                                            app.set_status(format!(
+                                                "Local PR already exists for '{}'",
+                                                branch
+                                            ));
+                                        } else {
+                                            let pr_ready = get_pr_ready(&repo);
+                                            let title = format!("PR for {}", branch);
+                                            match local::create_local_pr(
+                                                &repo, &title, "", &branch, !pr_ready,
+                                            ) {
+                                                Ok(number) => {
+                                                    app.refresh_data();
+                                                    app.set_status(format!(
+                                                        "Created local PR #{} for '{}'",
+                                                        number, branch
+                                                    ));
+                                                }
+                                                Err(e) => {
+                                                    app.set_status(format!("Error: {}", e));
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                KeyCode::Char('L') => {
+                                    let has_gh = gh_available();
+                                    if !has_gh && app.local_mode {
+                                        app.set_status(
+                                            "Cannot disable local mode: gh CLI not available"
+                                                .to_string(),
+                                        );
+                                    } else {
+                                        app.local_mode = !app.local_mode;
+                                        let _ = config::set_local_mode(app.local_mode);
+                                        let mode_label =
+                                            if app.local_mode { "LOCAL" } else { "GITHUB" };
+                                        app.set_status(format!("Switched to {} mode", mode_label));
+                                        app.refresh_data();
+                                    }
+                                }
                                 KeyCode::Char('C') => {
                                     let current_verify =
                                         get_verify_command(&app.repo).unwrap_or_default();
@@ -984,40 +1049,49 @@ fn main() -> Result<()> {
                                         if card.is_draft == Some(true) {
                                             if let Some(number) = card.pr_number {
                                                 let repo = app.repo.clone();
-                                                let output = Command::new("gh")
-                                                    .args([
-                                                        "pr",
-                                                        "ready",
-                                                        "--repo",
-                                                        &repo,
-                                                        &number.to_string(),
-                                                    ])
-                                                    .output();
-                                                match output {
-                                                    Ok(o) if o.status.success() => {
-                                                        app.pull_requests = fetch_prs(
+                                                if app.local_mode {
+                                                    match local::mark_local_pr_ready(&repo, number)
+                                                    {
+                                                        Ok(()) => {
+                                                            app.refresh_data();
+                                                            app.set_status(format!(
+                                                                "PR #{} marked as ready",
+                                                                number
+                                                            ));
+                                                        }
+                                                        Err(e) => {
+                                                            app.set_status(format!("Error: {}", e));
+                                                        }
+                                                    }
+                                                } else {
+                                                    let output = Command::new("gh")
+                                                        .args([
+                                                            "pr",
+                                                            "ready",
+                                                            "--repo",
                                                             &repo,
-                                                            app.pr_state_filter,
-                                                            app.pr_assignee_filter,
-                                                        );
-                                                        app.clamp_selected();
-                                                        app.last_refresh =
-                                                            std::time::Instant::now();
-                                                        app.set_status(format!(
-                                                            "PR #{} marked as ready",
-                                                            number
-                                                        ));
-                                                    }
-                                                    Ok(o) => {
-                                                        let stderr =
-                                                            String::from_utf8_lossy(&o.stderr);
-                                                        app.set_status(format!(
-                                                            "Error: {}",
-                                                            stderr.trim()
-                                                        ));
-                                                    }
-                                                    Err(e) => {
-                                                        app.set_status(format!("Error: {}", e));
+                                                            &number.to_string(),
+                                                        ])
+                                                        .output();
+                                                    match output {
+                                                        Ok(o) if o.status.success() => {
+                                                            app.refresh_data();
+                                                            app.set_status(format!(
+                                                                "PR #{} marked as ready",
+                                                                number
+                                                            ));
+                                                        }
+                                                        Ok(o) => {
+                                                            let stderr =
+                                                                String::from_utf8_lossy(&o.stderr);
+                                                            app.set_status(format!(
+                                                                "Error: {}",
+                                                                stderr.trim()
+                                                            ));
+                                                        }
+                                                        Err(e) => {
+                                                            app.set_status(format!("Error: {}", e));
+                                                        }
                                                     }
                                                 }
                                             }
@@ -1027,7 +1101,12 @@ fn main() -> Result<()> {
                                     }
                                 }
                                 KeyCode::Char('V') if app.active_section == 3 => {
-                                    if let Some(card) = app.pull_requests.get(app.selected_card[3])
+                                    if app.local_mode {
+                                        app.set_status(
+                                            "Revert is not available in local mode".to_string(),
+                                        );
+                                    } else if let Some(card) =
+                                        app.pull_requests.get(app.selected_card[3])
                                     {
                                         if let Some(number) = card.pr_number {
                                             if card.is_merged != Some(true) {
@@ -1055,6 +1134,19 @@ fn main() -> Result<()> {
                                                 app.set_status(
                                                     "Cannot merge a draft PR".to_string(),
                                                 );
+                                            } else if app.local_mode {
+                                                let branch = card.head_branch.clone();
+                                                app.confirm_modal = Some(ConfirmModal {
+                                                    message: format!(
+                                                        "Merge local PR #{} (git merge)?",
+                                                        number
+                                                    ),
+                                                    on_confirm: ConfirmAction::MergeLocalPr {
+                                                        number,
+                                                        branch,
+                                                    },
+                                                });
+                                                app.mode = Mode::Confirming;
                                             } else {
                                                 let branch = card.head_branch.clone();
                                                 app.confirm_modal = Some(ConfirmModal {
@@ -1105,21 +1197,10 @@ fn main() -> Result<()> {
                                 {
                                     if app.active_section == 0 {
                                         app.issue_state_filter = app.issue_state_filter.toggle();
-                                        app.issues = fetch_issues(
-                                            &app.repo,
-                                            app.issue_state_filter,
-                                            app.issue_assignee_filter,
-                                        );
                                     } else {
                                         app.pr_state_filter = app.pr_state_filter.toggle();
-                                        app.pull_requests = fetch_prs(
-                                            &app.repo,
-                                            app.pr_state_filter,
-                                            app.pr_assignee_filter,
-                                        );
                                     }
-                                    app.clamp_selected();
-                                    app.last_refresh = std::time::Instant::now();
+                                    app.refresh_data();
                                 }
                                 KeyCode::Char('m')
                                     if app.active_section == 0 || app.active_section == 3 =>
@@ -1127,21 +1208,10 @@ fn main() -> Result<()> {
                                     if app.active_section == 0 {
                                         app.issue_assignee_filter =
                                             app.issue_assignee_filter.toggle();
-                                        app.issues = fetch_issues(
-                                            &app.repo,
-                                            app.issue_state_filter,
-                                            app.issue_assignee_filter,
-                                        );
                                     } else {
                                         app.pr_assignee_filter = app.pr_assignee_filter.toggle();
-                                        app.pull_requests = fetch_prs(
-                                            &app.repo,
-                                            app.pr_state_filter,
-                                            app.pr_assignee_filter,
-                                        );
                                     }
-                                    app.clamp_selected();
-                                    app.last_refresh = std::time::Instant::now();
+                                    app.refresh_data();
                                 }
                                 KeyCode::Up | KeyCode::Char('k') => {
                                     app.move_card_up();
@@ -1167,15 +1237,14 @@ fn main() -> Result<()> {
                                     match modal.on_confirm {
                                         ConfirmAction::CloseIssue { number } => {
                                             let repo = app.repo.clone();
-                                            match close_issue(&repo, number) {
+                                            let result = if app.local_mode {
+                                                local::close_local_issue(&repo, number)
+                                            } else {
+                                                close_issue(&repo, number)
+                                            };
+                                            match result {
                                                 Ok(()) => {
-                                                    app.issues = fetch_issues(
-                                                        &repo,
-                                                        app.issue_state_filter,
-                                                        app.issue_assignee_filter,
-                                                    );
-                                                    app.clamp_selected();
-                                                    app.last_refresh = std::time::Instant::now();
+                                                    app.refresh_data();
                                                     app.set_status(format!(
                                                         "Closed issue #{}",
                                                         number
@@ -1289,6 +1358,51 @@ fn main() -> Result<()> {
                                                     app.set_status(format!("Error: {}", e));
                                                 }
                                             }
+                                        }
+                                        ConfirmAction::MergeLocalPr { number, branch } => {
+                                            let repo = app.repo.clone();
+                                            // Merge the branch locally using git merge
+                                            if let Some(ref branch_name) = branch {
+                                                match git::merge_branch(branch_name) {
+                                                    Ok(()) => {
+                                                        // Mark the local PR as merged
+                                                        let _ =
+                                                            local::merge_local_pr(&repo, number);
+                                                        // Clean up the worktree
+                                                        if let Some(wt) = app
+                                                            .worktrees
+                                                            .iter()
+                                                            .find(|w| w.title == *branch_name)
+                                                        {
+                                                            let wt_path = wt.description.clone();
+                                                            let wt_branch = wt.title.clone();
+                                                            let _ = remove_worktree(
+                                                                &wt_path,
+                                                                &wt_branch,
+                                                                app.multiplexer,
+                                                            );
+                                                        }
+                                                        app.set_status(format!(
+                                                            "Merged local PR #{} (branch: {})",
+                                                            number, branch_name
+                                                        ));
+                                                    }
+                                                    Err(e) => {
+                                                        app.set_status(format!(
+                                                            "Merge failed: {}",
+                                                            e
+                                                        ));
+                                                    }
+                                                }
+                                            } else {
+                                                // No branch, just mark as merged
+                                                let _ = local::merge_local_pr(&repo, number);
+                                                app.set_status(format!(
+                                                    "Merged local PR #{}",
+                                                    number
+                                                ));
+                                            }
+                                            app.refresh_data();
                                         }
                                         ConfirmAction::MergePr {
                                             number,
@@ -1434,10 +1548,16 @@ fn main() -> Result<()> {
                                             let claude_cmd = get_session_command(&repo);
                                             let mux = app.multiplexer;
                                             let create_worktree = modal.create_worktree;
+                                            let is_local = app.local_mode;
                                             let (tx, rx) = mpsc::channel();
                                             app.issue_submit_rx = Some(rx);
                                             std::thread::spawn(move || {
-                                                match create_issue(&repo, &title, &body) {
+                                                let issue_result = if is_local {
+                                                    local::create_local_issue(&repo, &title, &body)
+                                                } else {
+                                                    create_issue(&repo, &title, &body)
+                                                };
+                                                match issue_result {
                                                     Ok(number) => {
                                                         let worktree_result = if create_worktree {
                                                             let pr_ready = get_pr_ready(&repo);
@@ -1453,6 +1573,7 @@ fn main() -> Result<()> {
                                                                 auto_open_pr,
                                                                 claude_cmd.as_deref(),
                                                                 mux,
+                                                                is_local,
                                                             ))
                                                         } else {
                                                             None
@@ -1591,10 +1712,18 @@ fn main() -> Result<()> {
                                             let body = modal.body.value().to_string();
                                             let repo = app.repo.clone();
                                             let number = modal.number;
+                                            let is_local = app.local_mode;
                                             let (tx, rx) = mpsc::channel();
                                             app.issue_edit_rx = Some(rx);
                                             std::thread::spawn(move || {
-                                                match edit_issue(&repo, number, &title, &body) {
+                                                let result = if is_local {
+                                                    local::edit_local_issue(
+                                                        &repo, number, &title, &body,
+                                                    )
+                                                } else {
+                                                    edit_issue(&repo, number, &title, &body)
+                                                };
+                                                match result {
                                                     Ok(()) => {
                                                         let _ = tx.send(IssueEditResult::Success {
                                                             number,

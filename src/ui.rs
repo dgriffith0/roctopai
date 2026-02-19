@@ -49,7 +49,7 @@ fn text_input_spans(
     spans
 }
 
-pub fn ui_repo_select(frame: &mut Frame, state: &RepoSelectState) {
+pub fn ui_repo_select(frame: &mut Frame, state: &RepoSelectState, local_mode: bool) {
     let area = frame.area();
 
     // Center the content vertically
@@ -87,8 +87,13 @@ pub fn ui_repo_select(frame: &mut Frame, state: &RepoSelectState) {
                 .split(center);
 
             // Title
+            let prompt_text = if local_mode {
+                "Enter owner/repo (e.g. user/my-project):"
+            } else {
+                "Enter GitHub user or org:"
+            };
             let title = Paragraph::new(Line::from(vec![Span::styled(
-                "Enter GitHub user or org:",
+                prompt_text,
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
@@ -508,6 +513,15 @@ pub fn ui(frame: &mut Frame, app: &App) {
                 .add_modifier(Modifier::BOLD),
         ),
     ];
+    if app.local_mode {
+        repo_spans.push(Span::styled(
+            "  [LOCAL]",
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
     if app.main_behind_count > 0 {
         repo_spans.push(Span::styled(
             format!(
@@ -542,18 +556,34 @@ pub fn ui(frame: &mut Frame, app: &App) {
         ])
         .split(outer[1]);
 
-    let issue_title = format!(
-        " Issues ({}) [{}|{}] ",
-        app.issues.len(),
-        app.issue_state_filter.label(),
-        app.issue_assignee_filter.label()
-    );
-    let pr_title = format!(
-        " Pull Requests ({}) [{}|{}] ",
-        app.pull_requests.len(),
-        app.pr_state_filter.label(),
-        app.pr_assignee_filter.label()
-    );
+    let issue_title = if app.local_mode {
+        format!(
+            " Local Issues ({}) [{}] ",
+            app.issues.len(),
+            app.issue_state_filter.label(),
+        )
+    } else {
+        format!(
+            " Issues ({}) [{}|{}] ",
+            app.issues.len(),
+            app.issue_state_filter.label(),
+            app.issue_assignee_filter.label()
+        )
+    };
+    let pr_title = if app.local_mode {
+        format!(
+            " Local PRs ({}) [{}] ",
+            app.pull_requests.len(),
+            app.pr_state_filter.label(),
+        )
+    } else {
+        format!(
+            " Pull Requests ({}) [{}|{}] ",
+            app.pull_requests.len(),
+            app.pr_state_filter.label(),
+            app.pr_assignee_filter.label()
+        )
+    };
     let worktree_title = format!(" Worktrees ({}) ", app.worktrees.len());
     let session_title = format!(" Sessions ({}) ", app.sessions.len());
     let section_data: [(&str, Color, &[Card]); 4] = [
@@ -636,6 +666,15 @@ pub fn ui(frame: &mut Frame, app: &App) {
                 Span::styled(" Deps ", desc_style),
                 Span::styled(" C ", key_style),
                 Span::styled(" Config ", desc_style),
+                Span::styled(" L ", key_style),
+                Span::styled(
+                    if app.local_mode {
+                        " GitHub mode "
+                    } else {
+                        " Local mode "
+                    },
+                    desc_style,
+                ),
                 Span::styled(" x ", key_style),
                 Span::styled(
                     if app.show_messages {
@@ -745,6 +784,10 @@ pub fn ui(frame: &mut Frame, app: &App) {
                 area_spans.push(Span::styled(" Editor ", desc_style));
                 area_spans.push(Span::styled(" v ", key_accent));
                 area_spans.push(Span::styled(" Verify ", desc_style));
+                if app.local_mode {
+                    area_spans.push(Span::styled(" P ", key_accent));
+                    area_spans.push(Span::styled(" Create local PR ", desc_style));
+                }
                 area_spans.push(Span::styled(" d ", key_style));
                 area_spans.push(Span::styled(" Remove worktree ", desc_style));
             }
@@ -755,18 +798,31 @@ pub fn ui(frame: &mut Frame, app: &App) {
                 area_spans.push(Span::styled(" Kill session ", desc_style));
             }
             3 => {
-                area_spans.push(Span::styled(" o ", key_accent));
-                area_spans.push(Span::styled(" Open in browser ", desc_style));
+                if !app.local_mode {
+                    area_spans.push(Span::styled(" o ", key_accent));
+                    area_spans.push(Span::styled(" Open in browser ", desc_style));
+                }
                 area_spans.push(Span::styled(" r ", key_accent));
                 area_spans.push(Span::styled(" Mark ready ", desc_style));
                 area_spans.push(Span::styled(" M ", key_accent));
                 area_spans.push(Span::styled(" Merge ", desc_style));
-                area_spans.push(Span::styled(" V ", key_accent));
-                area_spans.push(Span::styled(" Revert ", desc_style));
+                if !app.local_mode {
+                    area_spans.push(Span::styled(" V ", key_accent));
+                    area_spans.push(Span::styled(" Revert ", desc_style));
+                }
                 area_spans.push(Span::styled(" s ", key_style));
-                area_spans.push(Span::styled(" Open/Closed ", desc_style));
-                area_spans.push(Span::styled(" m ", key_style));
-                area_spans.push(Span::styled(" Assigned to me ", desc_style));
+                area_spans.push(Span::styled(
+                    if app.local_mode {
+                        " Open/Merged "
+                    } else {
+                        " Open/Closed "
+                    },
+                    desc_style,
+                ));
+                if !app.local_mode {
+                    area_spans.push(Span::styled(" m ", key_style));
+                    area_spans.push(Span::styled(" Assigned to me ", desc_style));
+                }
             }
             _ => {}
         }

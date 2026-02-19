@@ -10,7 +10,12 @@ pub struct Dependency {
 
 pub fn check_dependencies() -> Vec<Dependency> {
     let mut deps = vec![
-        check_dep("gh", "gh", "GitHub CLI for issue/PR management", true),
+        check_dep(
+            "gh",
+            "gh",
+            "GitHub CLI for issue/PR management (optional for local mode)",
+            false,
+        ),
         check_dep("git", "git", "Version control with worktree support", true),
     ];
 
@@ -104,6 +109,15 @@ fn check_dep(
 
 pub fn has_missing_required(deps: &[Dependency]) -> bool {
     deps.iter().any(|d| d.required && !d.available)
+}
+
+/// Check if the GitHub CLI (`gh`) is available.
+pub fn gh_available() -> bool {
+    Command::new("which")
+        .arg("gh")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 /// Detect which AI coding assistants are available on the system.

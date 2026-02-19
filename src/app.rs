@@ -51,6 +51,7 @@ pub struct App {
     /// Maps branch name to the number of nudges sent.
     pub nudged_sessions: HashMap<String, usize>,
     pub ai_setup: Option<AiSetupState>,
+    pub local_mode: bool,
 }
 
 impl App {
@@ -98,6 +99,7 @@ impl App {
             multiplexer,
             nudged_sessions: HashMap::new(),
             ai_setup: None,
+            local_mode: false,
         }
     }
 
@@ -194,20 +196,48 @@ impl App {
     }
 
     pub fn refresh_data(&mut self) {
-        self.issues = fetch_issues(
-            &self.repo,
-            self.issue_state_filter,
-            self.issue_assignee_filter,
-        );
-        self.pull_requests = fetch_prs(&self.repo, self.pr_state_filter, self.pr_assignee_filter);
+        if self.local_mode {
+            self.issues = crate::local::fetch_local_issues(
+                &self.repo,
+                self.issue_state_filter,
+                self.issue_assignee_filter,
+            );
+            self.pull_requests = crate::local::fetch_local_prs(
+                &self.repo,
+                self.pr_state_filter,
+                self.pr_assignee_filter,
+            );
+        } else {
+            self.issues = fetch_issues(
+                &self.repo,
+                self.issue_state_filter,
+                self.issue_assignee_filter,
+            );
+            self.pull_requests =
+                fetch_prs(&self.repo, self.pr_state_filter, self.pr_assignee_filter);
+        }
         self.worktrees = fetch_worktrees();
 
-        // Clean up worktrees and sessions for merged PRs
-        let cleaned = cleanup_merged_worktrees(&self.repo, &self.worktrees, self.multiplexer);
-        if !cleaned.is_empty() {
-            self.set_status(format!("Cleaned up merged: {}", cleaned.join(", ")));
-            // Re-fetch worktrees after cleanup
-            self.worktrees = fetch_worktrees();
+        if self.local_mode {
+            // Clean up worktrees for locally merged PRs
+            let merged = crate::local::fetch_local_merged_pr_branches(&self.repo);
+            let cleaned = crate::git::cleanup_local_merged_worktrees(
+                &merged,
+                &self.worktrees,
+                self.multiplexer,
+            );
+            if !cleaned.is_empty() {
+                self.set_status(format!("Cleaned up merged: {}", cleaned.join(", ")));
+                self.worktrees = fetch_worktrees();
+            }
+        } else {
+            // Clean up worktrees and sessions for merged PRs
+            let cleaned = cleanup_merged_worktrees(&self.repo, &self.worktrees, self.multiplexer);
+            if !cleaned.is_empty() {
+                self.set_status(format!("Cleaned up merged: {}", cleaned.join(", ")));
+                // Re-fetch worktrees after cleanup
+                self.worktrees = fetch_worktrees();
+            }
         }
 
         self.sessions = fetch_sessions(&self.session_states, self.multiplexer);

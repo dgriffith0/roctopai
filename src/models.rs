@@ -107,6 +107,10 @@ pub enum ConfirmAction {
     RevertPr {
         number: u64,
     },
+    MergeLocalPr {
+        number: u64,
+        branch: Option<String>,
+    },
 }
 
 pub struct ConfirmModal {

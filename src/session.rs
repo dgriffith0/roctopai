@@ -470,6 +470,7 @@ pub fn create_session_for_worktree(
     auto_open_pr: bool,
     session_command: Option<&str>,
     mux: Multiplexer,
+    local_mode: bool,
 ) -> std::result::Result<(), String> {
     // Pre-trust the worktree directory for Claude
     let _ = trust_directory(worktree_path);
@@ -479,18 +480,20 @@ pub fn create_session_for_worktree(
         let _ = write_worktree_hook_config(worktree_path, script);
     }
 
-    // Auto-assign the issue to the current user
-    let _ = Command::new("gh")
-        .args([
-            "issue",
-            "edit",
-            "--repo",
-            repo,
-            &number.to_string(),
-            "--add-assignee",
-            "@me",
-        ])
-        .output();
+    // Auto-assign the issue to the current user (skip in local mode)
+    if !local_mode {
+        let _ = Command::new("gh")
+            .args([
+                "issue",
+                "edit",
+                "--repo",
+                repo,
+                &number.to_string(),
+                "--add-assignee",
+                "@me",
+            ])
+            .output();
+    }
 
     // Create session with a shell in the worktree directory
     mux.create_session(branch, worktree_path)?;
@@ -506,7 +509,12 @@ pub fn create_session_for_worktree(
             .join(" ")
     };
 
-    let prompt = if auto_open_pr {
+    let prompt = if local_mode {
+        format!(
+            "You are working on local issue #{} for the repo {}. Title: {}. {} Please investigate the codebase and implement a solution for this issue. When you are confident the problem is solved, commit your changes and push the branch.",
+            number, repo, title, body_clean
+        )
+    } else if auto_open_pr {
         let pr_instruction = if pr_ready {
             "open a pull request"
         } else {
@@ -562,6 +570,7 @@ pub fn create_worktree_and_session(
     auto_open_pr: bool,
     session_command: Option<&str>,
     mux: Multiplexer,
+    local_mode: bool,
 ) -> std::result::Result<(), String> {
     let repo_name = get_repo_name(repo);
     let branch = format!("issue-{}", number);
@@ -586,18 +595,20 @@ pub fn create_worktree_and_session(
         let _ = write_worktree_hook_config(&worktree_path, script);
     }
 
-    // Auto-assign the issue to the current user
-    let _ = Command::new("gh")
-        .args([
-            "issue",
-            "edit",
-            "--repo",
-            repo,
-            &number.to_string(),
-            "--add-assignee",
-            "@me",
-        ])
-        .output();
+    // Auto-assign the issue to the current user (skip in local mode)
+    if !local_mode {
+        let _ = Command::new("gh")
+            .args([
+                "issue",
+                "edit",
+                "--repo",
+                repo,
+                &number.to_string(),
+                "--add-assignee",
+                "@me",
+            ])
+            .output();
+    }
 
     // Create session with a shell in the worktree directory
     mux.create_session(&branch, &worktree_path)?;
@@ -613,7 +624,12 @@ pub fn create_worktree_and_session(
             .join(" ")
     };
 
-    let prompt = if auto_open_pr {
+    let prompt = if local_mode {
+        format!(
+            "You are working on local issue #{} for the repo {}. Title: {}. {} Please investigate the codebase and implement a solution for this issue. When you are confident the problem is solved, commit your changes and push the branch.",
+            number, repo, title, body_clean
+        )
+    } else if auto_open_pr {
         let pr_instruction = if pr_ready {
             "open a pull request"
         } else {

@@ -232,6 +232,87 @@ pub fn fetch_main_behind_count() -> usize {
     }
 }
 
+/// Detect the repository name from the git remote origin URL.
+/// Works without the `gh` CLI by parsing `git remote get-url origin`.
+/// Returns a "owner/repo" style string derived from the URL.
+pub fn detect_repo_from_git() -> Option<String> {
+    let output = Command::new("git")
+        .args(["remote", "get-url", "origin"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    parse_repo_from_url(&url)
+}
+
+/// Parse "owner/repo" from a git remote URL.
+/// Handles both SSH (git@github.com:owner/repo.git) and HTTPS (https://github.com/owner/repo.git) formats,
+/// as well as non-GitHub remotes (extracts the last two path segments).
+fn parse_repo_from_url(url: &str) -> Option<String> {
+    let url = url.trim_end_matches(".git");
+    if let Some(path) = url.strip_prefix("git@") {
+        // git@github.com:owner/repo
+        let path = path.split(':').nth(1)?;
+        Some(path.to_string())
+    } else if url.starts_with("https://") || url.starts_with("http://") {
+        // https://github.com/owner/repo
+        let parts: Vec<&str> = url.split('/').collect();
+        if parts.len() >= 2 {
+            let repo = parts[parts.len() - 1];
+            let owner = parts[parts.len() - 2];
+            Some(format!("{}/{}", owner, repo))
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
+/// Merge a branch into the current branch (main/master) using git merge.
+/// Used for local PR merging when not connected to GitHub.
+pub fn merge_branch(branch: &str) -> std::result::Result<(), String> {
+    let output = Command::new("git")
+        .args(["merge", branch])
+        .output()
+        .map_err(|e| format!("Failed to run git merge: {}", e))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!("git merge failed: {}", stderr.trim()))
+    }
+}
+
+/// Clean up worktrees whose branches have been locally merged.
+pub fn cleanup_local_merged_worktrees(
+    merged_branches: &[String],
+    worktrees: &[Card],
+    mux: Multiplexer,
+) -> Vec<String> {
+    if merged_branches.is_empty() {
+        return Vec::new();
+    }
+
+    let merged_set: HashSet<&str> = merged_branches.iter().map(|s| s.as_str()).collect();
+    let mut cleaned = Vec::new();
+
+    for wt in worktrees {
+        if merged_set.contains(wt.title.as_str())
+            && remove_worktree(&wt.description, &wt.title, mux).is_ok()
+        {
+            cleaned.push(wt.title.clone());
+        }
+    }
+
+    cleaned
+}
+
 pub fn trust_directory(path: &str) -> std::result::Result<(), String> {
     let claude_json = dirs::home_dir()
         .ok_or("Could not find home directory")?

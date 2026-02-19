@@ -30,6 +30,9 @@ pub struct Config {
     /// Set during initial setup based on which AI tools are installed.
     #[serde(default)]
     pub default_session_command: Option<String>,
+    /// Whether to operate in local-only mode (no GitHub API calls).
+    #[serde(default)]
+    pub local_mode: Option<bool>,
 }
 
 pub fn config_path() -> PathBuf {
@@ -75,6 +78,7 @@ pub fn save_config(repo: &str) -> Result<()> {
     let default_session_command = existing
         .as_ref()
         .and_then(|c| c.default_session_command.clone());
+    let local_mode = existing.as_ref().and_then(|c| c.local_mode);
     let multiplexer = existing.and_then(|c| c.multiplexer);
     let config = Config {
         repo: repo.to_string(),
@@ -85,6 +89,7 @@ pub fn save_config(repo: &str) -> Result<()> {
         session_commands,
         multiplexer,
         default_session_command,
+        local_mode,
     };
     fs::write(path, serde_json::to_string_pretty(&config)?)?;
     Ok(())
@@ -124,6 +129,7 @@ pub fn set_editor_command(repo: &str, command: &str) -> Result<()> {
         session_commands: HashMap::new(),
         multiplexer: None,
         default_session_command: None,
+        local_mode: None,
     });
     config
         .editor_commands
@@ -141,6 +147,7 @@ pub fn set_verify_command(repo: &str, command: &str) -> Result<()> {
         session_commands: HashMap::new(),
         multiplexer: None,
         default_session_command: None,
+        local_mode: None,
     });
     config
         .verify_commands
@@ -183,7 +190,28 @@ pub fn set_default_session_command(command: &str) -> Result<()> {
         session_commands: HashMap::new(),
         multiplexer: None,
         default_session_command: None,
+        local_mode: None,
     });
     config.default_session_command = Some(command.to_string());
+    save_full_config(&config)
+}
+
+pub fn get_local_mode() -> bool {
+    load_config().and_then(|c| c.local_mode).unwrap_or(false)
+}
+
+pub fn set_local_mode(enabled: bool) -> Result<()> {
+    let mut config = load_config().unwrap_or(Config {
+        repo: String::new(),
+        verify_commands: HashMap::new(),
+        editor_commands: HashMap::new(),
+        pr_ready: HashMap::new(),
+        auto_open_pr: HashMap::new(),
+        session_commands: HashMap::new(),
+        multiplexer: None,
+        default_session_command: None,
+        local_mode: None,
+    });
+    config.local_mode = Some(enabled);
     save_full_config(&config)
 }
