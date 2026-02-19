@@ -29,12 +29,12 @@ Turning a GitHub issue into a working pull request involves a lot of manual step
 
 Octopai checks for these on startup and will tell you what's missing.
 
-| Dependency | Why it's needed |
-|---|---|
-| [gh](https://cli.github.com/) | All GitHub operations — fetching issues, creating PRs, merging, etc. |
-| [git](https://git-scm.com/) | Worktree creation and branch management |
-| [python3](https://www.python.org/) | Runs the hook script that reports session status back to the board via Unix socket |
-| [claude](https://docs.anthropic.com/en/docs/claude-code) **or** [cursor](https://www.cursor.com/) | AI coding assistant — at least one is required |
+| Dependency | Required | Why it's needed |
+|---|---|---|
+| [git](https://git-scm.com/) | Yes | Worktree creation and branch management |
+| [python3](https://www.python.org/) | Yes | Runs the hook script that reports session status back to the board via Unix socket |
+| [claude](https://docs.anthropic.com/en/docs/claude-code) **or** [cursor](https://www.cursor.com/) | Yes | AI coding assistant — at least one is required |
+| [gh](https://cli.github.com/) | Only for GitHub mode | Fetching issues, creating PRs, merging, etc. Without it, octopai runs in local mode using a JSON-based store |
 
 ---
 
@@ -70,7 +70,9 @@ cargo install --path .
 
 ## Quick start
 
-Run `octopai` inside a GitHub-connected git repo and it will automatically detect the repository and open the board. If you run it outside a repo, you'll be prompted to enter a GitHub user or organization name and pick a repository. Press `Enter` on the board to switch repos at any time.
+Run `octopai` inside a git repo and it will automatically detect the repository and open the board. If `gh` is installed and authenticated, octopai connects to GitHub for issues and PRs. Without `gh`, it runs in **local mode**, storing issues and PRs in a JSON file at `~/.config/octopai/local/`. You can also toggle local mode in the configuration screen (`C` → `P`).
+
+If you run it outside a repo, you'll be prompted to enter a GitHub user or organization name and pick a repository. Press `Enter` on the board to switch repos at any time.
 
 ---
 
