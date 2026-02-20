@@ -249,7 +249,17 @@ impl App {
 
         // Auto-nudge idle sessions that have no associated PR.
         // Only nudge once per session to avoid spamming.
+        // In local mode, auto-create a local PR instead of nudging when
+        // the branch has commits.
         let max_nudges = 1;
+
+        // Collect actions first to avoid borrow conflicts with self.
+        enum SessionAction {
+            ClearNudge(String),
+            AutoCreateLocalPr(String),
+            Nudge(String),
+        }
+        let mut actions = Vec::new();
         for session in &self.sessions {
             if session.tag != "idle" {
                 continue;
@@ -260,20 +270,71 @@ impl App {
                 .iter()
                 .any(|pr| pr.head_branch.as_deref() == Some(branch));
             if has_pr {
-                // PR exists — clear any nudge tracking for this session
-                self.nudged_sessions.remove(branch);
+                actions.push(SessionAction::ClearNudge(branch.clone()));
                 continue;
             }
+
+            if self.local_mode {
+                // In local mode, auto-create a local PR when the session is
+                // idle and the branch has commits ahead of main.
+                if !crate::local::has_local_pr_for_branch(&self.repo, branch)
+                    && crate::git::branch_has_commits(branch)
+                {
+                    actions.push(SessionAction::AutoCreateLocalPr(branch.clone()));
+                }
+                continue;
+            }
+
             let nudge_count = self.nudged_sessions.entry(branch.clone()).or_insert(0);
             if *nudge_count >= max_nudges {
                 continue;
             }
             *nudge_count += 1;
-            self.multiplexer.send_keys(branch, "continue");
-            self.add_message(&format!(
-                "[monitor] Nudged {} to continue (no PR found)",
-                branch
-            ));
+            actions.push(SessionAction::Nudge(branch.clone()));
+        }
+
+        for action in actions {
+            match action {
+                SessionAction::ClearNudge(branch) => {
+                    self.nudged_sessions.remove(&branch);
+                }
+                SessionAction::AutoCreateLocalPr(branch) => {
+                    let pr_ready = crate::config::get_pr_ready(&self.repo);
+                    let title = crate::git::first_commit_summary(&branch)
+                        .unwrap_or_else(|| format!("PR for {}", branch));
+                    match crate::local::create_local_pr(&self.repo, &title, "", &branch, !pr_ready)
+                    {
+                        Ok(number) => {
+                            self.set_status(format!(
+                                "Auto-created local PR #{} for {}",
+                                number, branch
+                            ));
+                            self.add_message(&format!(
+                                "[monitor] Auto-created local PR #{} for {}",
+                                number, branch
+                            ));
+                            self.pull_requests = crate::local::fetch_local_prs(
+                                &self.repo,
+                                self.pr_state_filter,
+                                self.pr_assignee_filter,
+                            );
+                        }
+                        Err(e) => {
+                            self.add_message(&format!(
+                                "[monitor] Failed to auto-create local PR for {}: {}",
+                                branch, e
+                            ));
+                        }
+                    }
+                }
+                SessionAction::Nudge(branch) => {
+                    self.multiplexer.send_keys(&branch, "continue");
+                    self.add_message(&format!(
+                        "[monitor] Nudged {} to continue (no PR found)",
+                        branch
+                    ));
+                }
+            }
         }
 
         // Clean up nudge tracking for sessions that no longer exist

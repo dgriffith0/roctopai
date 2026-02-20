@@ -511,7 +511,7 @@ pub fn create_session_for_worktree(
 
     let prompt = if local_mode {
         format!(
-            "You are working on local issue #{} for the repo {}. Title: {}. {} Please investigate the codebase and implement a solution for this issue. When you are confident the problem is solved, commit your changes and push the branch.",
+            "You are working on local issue #{} for the repo {}. Title: {}. {} Please investigate the codebase and implement a solution for this issue. When you are confident the problem is solved, commit your changes.",
             number, repo, title, body_clean
         )
     } else if auto_open_pr {
@@ -626,7 +626,7 @@ pub fn create_worktree_and_session(
 
     let prompt = if local_mode {
         format!(
-            "You are working on local issue #{} for the repo {}. Title: {}. {} Please investigate the codebase and implement a solution for this issue. When you are confident the problem is solved, commit your changes and push the branch.",
+            "You are working on local issue #{} for the repo {}. Title: {}. {} Please investigate the codebase and implement a solution for this issue. When you are confident the problem is solved, commit your changes.",
             number, repo, title, body_clean
         )
     } else if auto_open_pr {
