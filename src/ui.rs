@@ -749,7 +749,11 @@ pub fn ui(frame: &mut Frame, app: &App) {
         ])
         .split(outer[1]);
 
-    let issue_title = if app.local_mode {
+    let spinner_char = SPINNER_FRAMES[app.spinner_tick % SPINNER_FRAMES.len()];
+
+    let issue_title = if app.section_loading[0] {
+        format!(" Issues {} ", spinner_char)
+    } else if app.local_mode {
         format!(
             " Local Issues ({}) [{}] ",
             app.issues.len(),
@@ -763,7 +767,9 @@ pub fn ui(frame: &mut Frame, app: &App) {
             app.issue_assignee_filter.label()
         )
     };
-    let pr_title = if app.local_mode {
+    let pr_title = if app.section_loading[3] {
+        format!(" Pull Requests {} ", spinner_char)
+    } else if app.local_mode {
         format!(
             " Local PRs ({}) [{}] ",
             app.pull_requests.len(),
@@ -777,8 +783,16 @@ pub fn ui(frame: &mut Frame, app: &App) {
             app.pr_assignee_filter.label()
         )
     };
-    let worktree_title = format!(" Worktrees ({}) ", app.worktrees.len());
-    let session_title = format!(" Sessions ({}) ", app.sessions.len());
+    let worktree_title = if app.section_loading[1] {
+        format!(" Worktrees {} ", spinner_char)
+    } else {
+        format!(" Worktrees ({}) ", app.worktrees.len())
+    };
+    let session_title = if app.section_loading[2] {
+        format!(" Sessions {} ", spinner_char)
+    } else {
+        format!(" Sessions ({}) ", app.sessions.len())
+    };
     let section_data: [(&str, Color, &[Card]); 4] = [
         (&issue_title, Color::Red, &app.issues),
         (&worktree_title, Color::Yellow, &app.worktrees),
@@ -812,6 +826,8 @@ pub fn ui(frame: &mut Frame, app: &App) {
             is_active && filter_focused,
             selected,
             &related_ids,
+            app.section_loading[i],
+            app.spinner_tick,
         );
     }
 
@@ -1517,6 +1533,8 @@ fn render_column(
     filter_focused: bool,
     selected: Option<usize>,
     related_ids: &HashSet<String>,
+    loading: bool,
+    spinner_tick: usize,
 ) {
     let border_style = if is_active {
         Style::default()
@@ -1596,6 +1614,26 @@ fn render_column(
             Span::styled(count_text, Style::default().fg(Color::DarkGray)),
         ]));
         frame.render_widget(input, area);
+    }
+
+    // Show per-section loading spinner when data is being fetched
+    if loading {
+        let spinner = SPINNER_FRAMES[spinner_tick % SPINNER_FRAMES.len()];
+        let loading_text = Paragraph::new(Line::from(vec![
+            Span::styled(
+                format!("{} ", spinner),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("Loading…", Style::default().fg(Color::DarkGray)),
+        ]))
+        .alignment(ratatui::layout::Alignment::Center);
+        // Center the spinner vertically in the cards area
+        let spinner_y = cards_area.y + cards_area.height / 2;
+        if spinner_y < cards_area.y + cards_area.height {
+            let spinner_area = Rect::new(cards_area.x, spinner_y, cards_area.width, 1);
+            frame.render_widget(loading_text, spinner_area);
+        }
+        return;
     }
 
     let card_height = 4u16;

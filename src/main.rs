@@ -42,8 +42,8 @@ use hooks::start_event_socket;
 use models::{
     AiSetupState, ConfigEditState, ConfirmAction, ConfirmModal, DepInstallConfirm, EditIssueModal,
     IssueEditResult, IssueModal, IssueSubmitResult, MergeStrategy, MessageLog, Mode,
-    RepoSelectPhase, Screen, SessionStates, StateFilter, TextInput, WorktreeCreateResult,
-    REFRESH_INTERVAL, SOCKET_PATH,
+    RepoSelectPhase, Screen, SectionData, SessionStates, StateFilter, TextInput,
+    WorktreeCreateResult, REFRESH_INTERVAL, SOCKET_PATH,
 };
 use session::{
     create_session_for_worktree, create_worktree_and_session, ensure_main_session,
@@ -120,9 +120,9 @@ fn main() -> Result<()> {
             if let Some(repo) = repo {
                 app.repo = repo.clone();
                 let _ = save_config(&repo);
-                app.refresh_data();
-                app.selected_card = [0; 4];
                 app.screen = Screen::Board;
+                app.selected_card = [0; 4];
+                app.start_async_refresh();
             }
         }
     }
@@ -149,19 +149,52 @@ fn main() -> Result<()> {
         if app.screen == Screen::Board
             && app.mode == Mode::Normal
             && app.last_refresh.elapsed() >= REFRESH_INTERVAL
+            && !app.is_section_loading()
         {
-            app.refresh_data();
+            app.start_async_refresh();
         }
 
         // Delayed refresh after PR merge (gives GitHub API time to propagate)
         if app.screen == Screen::Board
             && app.mode == Mode::Normal
+            && !app.is_section_loading()
             && app
                 .pending_refresh
                 .is_some_and(|t| t <= std::time::Instant::now())
         {
             app.pending_refresh = None;
-            app.refresh_data();
+            app.start_async_refresh();
+        }
+
+        // Poll per-section async refresh results
+        if let Some(rx) = &app.section_rx {
+            while let Ok(data) = rx.try_recv() {
+                match data {
+                    SectionData::Issues(issues) => {
+                        app.issues = issues;
+                        app.section_loading[0] = false;
+                    }
+                    SectionData::Worktrees(worktrees) => {
+                        app.worktrees = worktrees;
+                        app.section_loading[1] = false;
+                    }
+                    SectionData::Sessions(sessions) => {
+                        app.sessions = sessions;
+                        app.section_loading[2] = false;
+                    }
+                    SectionData::PullRequests(prs) => {
+                        app.pull_requests = prs;
+                        app.section_loading[3] = false;
+                    }
+                    SectionData::MainBehindCount(count) => {
+                        app.main_behind_count = count;
+                    }
+                }
+            }
+            if !app.is_section_loading() {
+                app.section_rx = None;
+                app.post_refresh_cleanup();
+            }
         }
 
         // Check for issue submission results from background thread
@@ -265,10 +298,11 @@ fn main() -> Result<()> {
             }
         }
 
-        // Advance spinner tick when submitting
+        // Advance spinner tick when any spinner is active
         let has_spinner = app.issue_submit_rx.is_some()
             || app.issue_edit_rx.is_some()
-            || app.worktree_create_rx.is_some();
+            || app.worktree_create_rx.is_some()
+            || app.is_section_loading();
         if has_spinner {
             app.spinner_tick = app.spinner_tick.wrapping_add(1);
         }
@@ -469,9 +503,9 @@ fn main() -> Result<()> {
                                 if let Some(repo) = repo {
                                     app.repo = repo.clone();
                                     let _ = save_config(&repo);
-                                    app.refresh_data();
                                     app.selected_card = [0; 4];
                                     app.screen = Screen::Board;
+                                    app.start_async_refresh();
                                 } else {
                                     app.screen = Screen::RepoSelect;
                                 }
@@ -624,7 +658,7 @@ fn main() -> Result<()> {
                                     if input_val.contains('/') {
                                         app.repo = input_val;
                                         app.screen = Screen::Board;
-                                        app.refresh_data();
+                                        app.start_async_refresh();
                                     } else {
                                         app.repo_select.error = Some(
                                             "In local mode, enter full owner/repo (e.g. user/my-project)".into(),
@@ -688,9 +722,9 @@ fn main() -> Result<()> {
                                     let repo = repo.clone();
                                     let _ = save_config(&repo);
                                     app.repo = repo;
-                                    app.refresh_data();
                                     app.selected_card = [0; 4];
                                     app.screen = Screen::Board;
+                                    app.start_async_refresh();
                                 }
                             }
                             KeyCode::Up | KeyCode::Char('k') => {
@@ -802,8 +836,10 @@ fn main() -> Result<()> {
                                     app.active_section = (app.active_section + 3) % 4;
                                 }
                                 KeyCode::Char('R') => {
-                                    app.refresh_data();
-                                    app.set_status("Refreshed".to_string());
+                                    if !app.is_section_loading() {
+                                        app.start_async_refresh();
+                                        app.set_status("Refreshing…".to_string());
+                                    }
                                 }
                                 KeyCode::Char('p') => match pull_main() {
                                     Ok(branch) => {

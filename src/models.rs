@@ -303,6 +303,15 @@ pub enum WorktreeCreateResult {
     },
 }
 
+/// Result sent from per-section background refresh threads.
+pub enum SectionData {
+    Issues(Vec<Card>),
+    Worktrees(Vec<Card>),
+    Sessions(Vec<Card>),
+    PullRequests(Vec<Card>),
+    MainBehindCount(usize),
+}
+
 pub fn fuzzy_match(query: &str, target: &str) -> bool {
     let target_lower = target.to_lowercase();
     let mut target_chars = target_lower.chars();
