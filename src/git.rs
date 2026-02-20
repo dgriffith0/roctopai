@@ -299,6 +299,87 @@ pub fn merge_branch(branch: &str) -> std::result::Result<(), String> {
     }
 }
 
+/// Check if a branch has any commits ahead of main/master.
+/// Used to detect if Claude has finished work on a local branch.
+pub fn branch_has_commits(branch: &str) -> bool {
+    // Determine main branch name
+    let main_branch = if Command::new("git")
+        .args(["rev-parse", "--verify", "refs/heads/main"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        "main"
+    } else if Command::new("git")
+        .args(["rev-parse", "--verify", "refs/heads/master"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        "master"
+    } else {
+        return false;
+    };
+
+    let output = Command::new("git")
+        .args([
+            "rev-list",
+            "--count",
+            &format!("{}..{}", main_branch, branch),
+        ])
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let count: usize = String::from_utf8_lossy(&o.stdout)
+                .trim()
+                .parse()
+                .unwrap_or(0);
+            count > 0
+        }
+        _ => false,
+    }
+}
+
+/// Get the first commit message on a branch (ahead of main/master).
+/// Used to generate a PR title for auto-created local PRs.
+pub fn first_commit_summary(branch: &str) -> Option<String> {
+    let main_branch = if Command::new("git")
+        .args(["rev-parse", "--verify", "refs/heads/main"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        "main"
+    } else if Command::new("git")
+        .args(["rev-parse", "--verify", "refs/heads/master"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        "master"
+    } else {
+        return None;
+    };
+
+    let output = Command::new("git")
+        .args([
+            "log",
+            "--format=%s",
+            "--reverse",
+            &format!("{}..{}", main_branch, branch),
+        ])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout.lines().next().map(|s| s.to_string())
+}
+
 /// Clean up worktrees whose branches have been locally merged.
 pub fn cleanup_local_merged_worktrees(
     merged_branches: &[String],
