@@ -636,8 +636,9 @@ pub fn ui(frame: &mut Frame, app: &App) {
         ),
     ];
     if app.local_mode {
+        repo_spans.push(Span::raw("  "));
         repo_spans.push(Span::styled(
-            "  [LOCAL]",
+            "[LOCAL]",
             Style::default()
                 .fg(Color::Black)
                 .bg(Color::Cyan)
