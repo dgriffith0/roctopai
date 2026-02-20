@@ -1124,7 +1124,7 @@ fn main() -> Result<()> {
                                     app.screen = Screen::Configuration;
                                 }
                                 // Main worktree Claude session: create if needed, then attach
-                                KeyCode::Char('t') => {
+                                KeyCode::Char('T') => {
                                     match ensure_main_session(app.multiplexer) {
                                         Ok(created) => {
                                             if created {
