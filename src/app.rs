@@ -89,7 +89,7 @@ impl App {
             issue_state_filter: StateFilter::Open,
             issue_assignee_filter: AssigneeFilter::All,
             pr_state_filter: StateFilter::Open,
-            pr_assignee_filter: AssigneeFilter::All,
+            pr_assignee_filter: AssigneeFilter::Mine,
             issue_submit_rx: None,
             issue_edit_rx: None,
             edit_issue_modal: None,
