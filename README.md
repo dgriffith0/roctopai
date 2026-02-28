@@ -115,6 +115,10 @@ Four columns: **Issues**, **Worktrees**, **Sessions**, and **Pull Requests**. Us
 
 **Sessions** — `a` attach, `d` kill
 
+> **Detaching from a session:** After attaching with `a`, use your multiplexer's detach keybinding to return to the board.
+> - **tmux** — `Ctrl+b` then `d`
+> - **GNU Screen** — `Ctrl+a` then `d`
+
 **Pull Requests** — `o` open in browser, `r` mark ready, `M` merge, `V` revert, `s` toggle open/closed, `m` toggle assigned-to-me
 
 ---
