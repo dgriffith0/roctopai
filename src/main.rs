@@ -174,9 +174,13 @@ fn main() -> Result<()> {
             app.start_async_refresh();
         }
 
+        // Track whether any async result was received so we can re-render immediately
+        let mut needs_redraw = false;
+
         // Poll per-section async refresh results
         if let Some(rx) = &app.section_rx {
             while let Ok(data) = rx.try_recv() {
+                needs_redraw = true;
                 match data {
                     SectionData::Issues(issues) => {
                         app.issues = issues;
@@ -208,6 +212,7 @@ fn main() -> Result<()> {
         // Check for issue submission results from background thread
         if let Some(rx) = &app.issue_submit_rx {
             if let Ok(result) = rx.try_recv() {
+                needs_redraw = true;
                 app.issue_submit_rx = None;
                 match result {
                     IssueSubmitResult::Success {
@@ -252,6 +257,7 @@ fn main() -> Result<()> {
         // Check for issue edit results from background thread
         if let Some(rx) = &app.issue_edit_rx {
             if let Ok(result) = rx.try_recv() {
+                needs_redraw = true;
                 app.issue_edit_rx = None;
                 match result {
                     IssueEditResult::Success { number } => {
@@ -273,6 +279,7 @@ fn main() -> Result<()> {
         // Check for worktree/session creation results from background thread
         if let Some(rx) = &app.worktree_create_rx {
             if let Ok(result) = rx.try_recv() {
+                needs_redraw = true;
                 app.worktree_create_rx = None;
                 app.loading_message = None;
                 match result {
@@ -304,6 +311,11 @@ fn main() -> Result<()> {
                     },
                 }
             }
+        }
+
+        // If any async result was received, immediately re-render before blocking on input
+        if needs_redraw {
+            continue;
         }
 
         // Advance spinner tick when any spinner is active
