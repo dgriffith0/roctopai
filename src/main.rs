@@ -43,7 +43,7 @@ use models::{
     AiSetupState, ConfigEditState, ConfirmAction, ConfirmModal, DepInstallConfirm, EditIssueModal,
     IssueEditResult, IssueModal, IssueSubmitResult, MergeStrategy, MessageLog, Mode,
     RepoSelectPhase, Screen, SectionData, SessionStates, StateFilter, TextInput,
-    WorktreeCreateResult, REFRESH_INTERVAL, SOCKET_PATH,
+    WorktreeCreateResult, SOCKET_PATH,
 };
 use session::{
     create_session_for_worktree, create_worktree_and_session, ensure_main_session,
@@ -150,15 +150,6 @@ fn main() -> Result<()> {
                 }
             }
         })?;
-
-        // Auto-refresh when interval has elapsed and on Board screen in Normal mode
-        if app.screen == Screen::Board
-            && app.mode == Mode::Normal
-            && app.last_refresh.elapsed() >= REFRESH_INTERVAL
-            && !app.is_section_loading()
-        {
-            app.start_async_refresh();
-        }
 
         // Delayed refresh after PR merge (gives GitHub API time to propagate)
         if app.screen == Screen::Board
@@ -313,16 +304,9 @@ fn main() -> Result<()> {
             app.spinner_tick = app.spinner_tick.wrapping_add(1);
         }
 
-        // Poll for events with a short timeout so the refresh timer updates every second
+        // Poll for events with a short timeout for spinner animation
         let poll_timeout = if has_spinner {
-            // Fast polling for spinner animation
             Duration::from_millis(100)
-        } else if app.screen == Screen::Board && app.mode == Mode::Normal {
-            let remaining = REFRESH_INTERVAL
-                .checked_sub(app.last_refresh.elapsed())
-                .unwrap_or(Duration::ZERO);
-            // Cap at 1 second so the countdown timer display stays current
-            remaining.min(Duration::from_secs(1))
         } else {
             Duration::from_secs(60)
         };

@@ -1,11 +1,8 @@
+use ratatui::style::Color;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
-
-use ratatui::style::Color;
 
 pub const SOCKET_PATH: &str = "/tmp/octopai-events.sock";
-pub const REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 pub const MAX_MESSAGES: usize = 100;
 
 pub type SessionStates = Arc<Mutex<HashMap<String, String>>>;

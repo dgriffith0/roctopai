@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::time::Duration;
 
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -14,7 +13,7 @@ use crate::config::config_path;
 use crate::deps::Dependency;
 use crate::models::{
     card_matches, AiSetupState, Card, ConfirmModal, DepInstallConfirm, EditIssueModal, IssueModal,
-    Mode, RepoSelectPhase, RepoSelectState, StateFilter, TextInput, REFRESH_INTERVAL,
+    Mode, RepoSelectPhase, RepoSelectState, StateFilter, TextInput,
 };
 use crate::session::{
     default_editor_command, COMMAND_SHORTCUTS, DEFAULT_CLAUDE_COMMAND, DEFAULT_EDITOR_COMMAND,
@@ -996,31 +995,9 @@ pub fn ui(frame: &mut Frame, app: &App) {
         .constraints([Constraint::Length(1), Constraint::Length(1)])
         .split(outer[3]);
 
-    // Top row: global actions with timer on right
-    let top_bottom = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(0), Constraint::Length(14)])
-        .split(bottom_rows[0]);
-
+    // Top row: global actions
     let global_legend = Paragraph::new(Line::from(global_spans));
-    frame.render_widget(global_legend, top_bottom[0]);
-
-    // Refresh countdown timer
-    let remaining = REFRESH_INTERVAL
-        .checked_sub(app.last_refresh.elapsed())
-        .unwrap_or(Duration::ZERO);
-    let secs = remaining.as_secs();
-    let timer_text = format!(" ⏱ {}s ", secs);
-    let timer_style = if secs <= 5 {
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    let timer = Paragraph::new(Line::from(Span::styled(timer_text, timer_style)))
-        .alignment(ratatui::layout::Alignment::Right);
-    frame.render_widget(timer, top_bottom[1]);
+    frame.render_widget(global_legend, bottom_rows[0]);
 
     // Bottom row: area-specific actions
     let area_legend = Paragraph::new(Line::from(area_spans));
