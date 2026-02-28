@@ -33,6 +33,9 @@ pub struct Config {
     /// Whether to operate in local-only mode (no GitHub API calls).
     #[serde(default)]
     pub local_mode: Option<bool>,
+    /// Automatic refresh interval in seconds. 0 or absent means no auto-refresh.
+    #[serde(default)]
+    pub auto_refresh_secs: Option<u64>,
 }
 
 pub fn config_path() -> PathBuf {
@@ -79,6 +82,7 @@ pub fn save_config(repo: &str) -> Result<()> {
         .as_ref()
         .and_then(|c| c.default_session_command.clone());
     let local_mode = existing.as_ref().and_then(|c| c.local_mode);
+    let auto_refresh_secs = existing.as_ref().and_then(|c| c.auto_refresh_secs);
     let multiplexer = existing.and_then(|c| c.multiplexer);
     let config = Config {
         repo: repo.to_string(),
@@ -90,6 +94,7 @@ pub fn save_config(repo: &str) -> Result<()> {
         multiplexer,
         default_session_command,
         local_mode,
+        auto_refresh_secs,
     };
     fs::write(path, serde_json::to_string_pretty(&config)?)?;
     Ok(())
@@ -130,6 +135,7 @@ pub fn set_editor_command(repo: &str, command: &str) -> Result<()> {
         multiplexer: None,
         default_session_command: None,
         local_mode: None,
+        auto_refresh_secs: None,
     });
     config
         .editor_commands
@@ -148,6 +154,7 @@ pub fn set_verify_command(repo: &str, command: &str) -> Result<()> {
         multiplexer: None,
         default_session_command: None,
         local_mode: None,
+        auto_refresh_secs: None,
     });
     config
         .verify_commands
@@ -191,6 +198,7 @@ pub fn set_default_session_command(command: &str) -> Result<()> {
         multiplexer: None,
         default_session_command: None,
         local_mode: None,
+        auto_refresh_secs: None,
     });
     config.default_session_command = Some(command.to_string());
     save_full_config(&config)
@@ -211,7 +219,12 @@ pub fn set_local_mode(enabled: bool) -> Result<()> {
         multiplexer: None,
         default_session_command: None,
         local_mode: None,
+        auto_refresh_secs: None,
     });
     config.local_mode = Some(enabled);
     save_full_config(&config)
+}
+
+pub fn get_auto_refresh_secs() -> u64 {
+    load_config().and_then(|c| c.auto_refresh_secs).unwrap_or(0)
 }

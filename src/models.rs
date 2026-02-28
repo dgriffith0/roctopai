@@ -1,11 +1,9 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use ratatui::style::Color;
 
 pub const SOCKET_PATH: &str = "/tmp/octopai-events.sock";
-pub const REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 pub const MAX_MESSAGES: usize = 100;
 
 pub type SessionStates = Arc<Mutex<HashMap<String, String>>>;
@@ -160,7 +158,8 @@ pub struct ConfigEditState {
     pub auto_open_pr: bool,
     pub session_command: TextInput,
     pub multiplexer: crate::session::Multiplexer,
-    pub active_field: usize, // 0 = verify, 1 = editor, 2 = pr_ready, 3 = auto_open_pr, 4 = session_command, 5 = multiplexer
+    pub refresh_interval: TextInput,
+    pub active_field: usize, // 0 = verify, 1 = editor, 2 = pr_ready, 3 = auto_open_pr, 4 = session_command, 5 = multiplexer, 6 = refresh_interval
 }
 
 impl ConfigEditState {
@@ -171,7 +170,13 @@ impl ConfigEditState {
         auto_open_pr: bool,
         session_command: String,
         multiplexer: crate::session::Multiplexer,
+        auto_refresh_secs: u64,
     ) -> Self {
+        let refresh_text = if auto_refresh_secs == 0 {
+            String::new()
+        } else {
+            auto_refresh_secs.to_string()
+        };
         Self {
             verify_command: TextInput::from(verify_command),
             editor_command: TextInput::from(editor_command),
@@ -179,6 +184,7 @@ impl ConfigEditState {
             auto_open_pr,
             session_command: TextInput::from(session_command),
             multiplexer,
+            refresh_interval: TextInput::from(refresh_text),
             active_field: 0,
         }
     }
