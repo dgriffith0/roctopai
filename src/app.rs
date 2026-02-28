@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use crate::deps::Dependency;
 use crate::git::{cleanup_merged_worktrees, fetch_main_behind_count, fetch_worktrees};
-use crate::github::fetch_prs;
+use crate::github::{assign_pr, fetch_prs};
 
 use crate::hooks::ensure_hook_script;
 use crate::models::{
@@ -231,6 +231,15 @@ impl App {
             );
             self.pull_requests =
                 fetch_prs(&self.repo, self.pr_state_filter, self.pr_assignee_filter);
+
+            // Auto-assign unassigned PRs to the current user
+            for card in &self.pull_requests {
+                if card.is_assigned == Some(false) {
+                    if let Some(number) = card.pr_number {
+                        assign_pr(&self.repo, number);
+                    }
+                }
+            }
         }
         self.worktrees = fetch_worktrees();
 

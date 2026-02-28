@@ -138,6 +138,7 @@ pub fn fetch_issues(
                 is_draft: None,
                 is_merged: None,
                 head_branch: None,
+                is_assigned: None,
             }
         })
         .collect();
@@ -155,7 +156,7 @@ pub fn fetch_prs(repo: &str, state: StateFilter, assignee: AssigneeFilter) -> Ve
         "--state".to_string(),
         state.label().to_string(),
         "--json".to_string(),
-        "number,title,body,isDraft,url,headRefName,state,mergedAt".to_string(),
+        "number,title,body,isDraft,url,headRefName,state,mergedAt,assignees".to_string(),
         "--limit".to_string(),
         "500".to_string(),
     ];
@@ -186,6 +187,10 @@ pub fn fetch_prs(repo: &str, state: StateFilter, assignee: AssigneeFilter) -> Ve
             let url = pr["url"].as_str().unwrap_or("").to_string();
             let branch = pr["headRefName"].as_str().unwrap_or("").to_string();
             let is_merged = pr["mergedAt"].as_str().is_some();
+            let is_assigned = pr["assignees"]
+                .as_array()
+                .map(|a| !a.is_empty())
+                .unwrap_or(false);
 
             let description = if body.len() > 80 {
                 format!("{}...", &body[..77])
@@ -221,12 +226,28 @@ pub fn fetch_prs(repo: &str, state: StateFilter, assignee: AssigneeFilter) -> Ve
                 is_draft: Some(is_draft),
                 is_merged: Some(is_merged),
                 head_branch: Some(branch),
+                is_assigned: Some(is_assigned),
             }
         })
         .collect();
     // Reverse to show oldest first (gh returns newest first)
     cards.reverse();
     cards
+}
+
+/// Auto-assign a pull request to the current user.
+pub fn assign_pr(repo: &str, number: u64) {
+    let _ = Command::new("gh")
+        .args([
+            "pr",
+            "edit",
+            "--repo",
+            repo,
+            &number.to_string(),
+            "--add-assignee",
+            "@me",
+        ])
+        .output();
 }
 
 pub fn create_issue(repo: &str, title: &str, body: &str) -> std::result::Result<u64, String> {

@@ -22,6 +22,7 @@ pub struct Card {
     pub is_draft: Option<bool>,
     pub is_merged: Option<bool>,
     pub head_branch: Option<String>,
+    pub is_assigned: Option<bool>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
