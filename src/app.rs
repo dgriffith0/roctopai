@@ -90,7 +90,7 @@ impl App {
             session_states,
             hook_script_path,
             issue_state_filter: StateFilter::Open,
-            issue_assignee_filter: AssigneeFilter::All,
+            issue_assignee_filter: AssigneeFilter::Mine,
             pr_state_filter: StateFilter::Open,
             pr_assignee_filter: AssigneeFilter::Mine,
             issue_submit_rx: None,
