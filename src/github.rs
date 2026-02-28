@@ -39,7 +39,19 @@ pub fn fetch_repos(owner: &str) -> std::result::Result<Vec<String>, String> {
     Ok(repos)
 }
 
-pub fn fetch_issues(repo: &str, state: StateFilter, assignee: AssigneeFilter) -> Vec<Card> {
+pub fn fetch_issues(
+    repo: &str,
+    state: StateFilter,
+    assignee: AssigneeFilter,
+    search: Option<&str>,
+) -> Vec<Card> {
+    // When assigned to current user, always fetch all issues.
+    // When searching or viewing all issues, use a smaller limit for speed.
+    let limit = if assignee == AssigneeFilter::Mine {
+        "500"
+    } else {
+        "30"
+    };
     let mut args = vec![
         "issue".to_string(),
         "list".to_string(),
@@ -50,11 +62,17 @@ pub fn fetch_issues(repo: &str, state: StateFilter, assignee: AssigneeFilter) ->
         "--json".to_string(),
         "number,title,body,labels,state".to_string(),
         "--limit".to_string(),
-        "500".to_string(),
+        limit.to_string(),
     ];
     if assignee == AssigneeFilter::Mine {
         args.push("--assignee".to_string());
         args.push("@me".to_string());
+    }
+    if let Some(query) = search {
+        if !query.is_empty() {
+            args.push("--search".to_string());
+            args.push(query.to_string());
+        }
     }
     let output = Command::new("gh").args(&args).output();
 
