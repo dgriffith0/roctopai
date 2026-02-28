@@ -164,7 +164,7 @@ pub fn get_pr_ready(repo: &str) -> bool {
 pub fn get_auto_open_pr(repo: &str) -> bool {
     load_config()
         .and_then(|c| c.auto_open_pr.get(repo).copied())
-        .unwrap_or(true)
+        .unwrap_or(false)
 }
 
 pub fn get_session_command(repo: &str) -> Option<String> {
