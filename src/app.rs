@@ -4,7 +4,8 @@ use std::time::Instant;
 
 use crate::deps::Dependency;
 use crate::git::{cleanup_merged_worktrees, fetch_main_behind_count, fetch_worktrees};
-use crate::github::{fetch_issues, fetch_prs};
+use crate::github::fetch_prs;
+
 use crate::hooks::ensure_hook_script;
 use crate::models::{
     AiSetupState, AssigneeFilter, Card, ConfigEditState, ConfirmModal, DepInstallConfirm,
@@ -55,6 +56,8 @@ pub struct App {
     pub local_mode: bool,
     pub dep_selected: usize,
     pub dep_install_confirm: Option<DepInstallConfirm>,
+    /// Server-side search query for GitHub issues.
+    pub issue_search_query: Option<String>,
     /// Per-section loading state: [issues, worktrees, sessions, pull_requests].
     pub section_loading: [bool; 4],
     /// Receiver for per-section async refresh results.
@@ -109,6 +112,7 @@ impl App {
             local_mode: false,
             dep_selected: 0,
             dep_install_confirm: None,
+            issue_search_query: None,
             section_loading: [false; 4],
             section_rx: None,
         }
@@ -219,10 +223,11 @@ impl App {
                 self.pr_assignee_filter,
             );
         } else {
-            self.issues = fetch_issues(
+            self.issues = crate::github::fetch_issues(
                 &self.repo,
                 self.issue_state_filter,
                 self.issue_assignee_filter,
+                self.issue_search_query.as_deref(),
             );
             self.pull_requests =
                 fetch_prs(&self.repo, self.pr_state_filter, self.pr_assignee_filter);
@@ -369,11 +374,12 @@ impl App {
         let repo_i = repo.clone();
         let isf = self.issue_state_filter;
         let iaf = self.issue_assignee_filter;
+        let search_q = self.issue_search_query.clone();
         std::thread::spawn(move || {
             let issues = if local_mode {
                 crate::local::fetch_local_issues(&repo_i, isf, iaf)
             } else {
-                fetch_issues(&repo_i, isf, iaf)
+                crate::github::fetch_issues(&repo_i, isf, iaf, search_q.as_deref())
             };
             let _ = tx_issues.send(SectionData::Issues(issues));
         });

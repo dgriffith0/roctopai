@@ -776,9 +776,32 @@ fn main() -> Result<()> {
                     match &mut app.mode {
                         Mode::Filtering { query, focused } if *focused => match key.code {
                             KeyCode::Esc => {
+                                // Clear any server-side search when clearing the filter
+                                if app.active_section == 0
+                                    && !app.local_mode
+                                    && app.issue_search_query.is_some()
+                                {
+                                    app.issue_search_query = None;
+                                    app.start_async_refresh();
+                                }
                                 app.mode = Mode::Normal;
                             }
                             KeyCode::Enter => {
+                                // For the Issues column in GitHub mode, trigger
+                                // a server-side search so results come from GitHub
+                                // rather than filtering a small local set.
+                                if app.active_section == 0 && !app.local_mode {
+                                    let q = query.value().to_string();
+                                    if q.is_empty() {
+                                        if app.issue_search_query.is_some() {
+                                            app.issue_search_query = None;
+                                            app.start_async_refresh();
+                                        }
+                                    } else {
+                                        app.issue_search_query = Some(q);
+                                        app.start_async_refresh();
+                                    }
+                                }
                                 if let Mode::Filtering { focused, .. } = &mut app.mode {
                                     *focused = false;
                                 }
@@ -817,6 +840,14 @@ fn main() -> Result<()> {
                                 KeyCode::Char('q') if !is_filtering => break,
                                 KeyCode::Esc => {
                                     if is_filtering {
+                                        // Clear server-side search when clearing the filter
+                                        if app.active_section == 0
+                                            && !app.local_mode
+                                            && app.issue_search_query.is_some()
+                                        {
+                                            app.issue_search_query = None;
+                                            app.start_async_refresh();
+                                        }
                                         app.mode = Mode::Normal;
                                     } else {
                                         break;
