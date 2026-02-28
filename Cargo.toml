@@ -1,6 +1,6 @@
 [package]
 name = "octopai"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "AI-powered CLI assistant for managing multiple projects"
 homepage = "https://github.com/dgriffith0/octopai"
