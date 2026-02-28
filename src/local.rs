@@ -115,6 +115,7 @@ pub fn fetch_local_issues(repo: &str, state: StateFilter, _assignee: AssigneeFil
                 is_draft: None,
                 is_merged: None,
                 head_branch: None,
+                is_assigned: None,
             }
         })
         .collect();
@@ -218,6 +219,7 @@ pub fn fetch_local_prs(repo: &str, state: StateFilter, _assignee: AssigneeFilter
                 is_draft: Some(pr.is_draft),
                 is_merged: Some(pr.state == "merged"),
                 head_branch: Some(pr.branch.clone()),
+                is_assigned: None,
             }
         })
         .collect();
