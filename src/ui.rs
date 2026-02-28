@@ -14,7 +14,7 @@ use crate::config::config_path;
 use crate::deps::Dependency;
 use crate::models::{
     card_matches, AiSetupState, Card, ConfirmModal, DepInstallConfirm, EditIssueModal, IssueModal,
-    Mode, RepoSelectPhase, RepoSelectState, StateFilter, TextInput, REFRESH_INTERVAL,
+    Mode, RepoSelectPhase, RepoSelectState, StateFilter, TextInput,
 };
 use crate::session::{
     default_editor_command, COMMAND_SHORTCUTS, DEFAULT_CLAUDE_COMMAND, DEFAULT_EDITOR_COMMAND,
@@ -996,31 +996,36 @@ pub fn ui(frame: &mut Frame, app: &App) {
         .constraints([Constraint::Length(1), Constraint::Length(1)])
         .split(outer[3]);
 
-    // Top row: global actions with timer on right
+    // Top row: global actions with timer on right (if auto-refresh enabled)
+    let auto_refresh_secs = crate::config::get_auto_refresh_secs();
+    let timer_width = if auto_refresh_secs > 0 { 14 } else { 0 };
     let top_bottom = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(0), Constraint::Length(14)])
+        .constraints([Constraint::Min(0), Constraint::Length(timer_width)])
         .split(bottom_rows[0]);
 
     let global_legend = Paragraph::new(Line::from(global_spans));
     frame.render_widget(global_legend, top_bottom[0]);
 
-    // Refresh countdown timer
-    let remaining = REFRESH_INTERVAL
-        .checked_sub(app.last_refresh.elapsed())
-        .unwrap_or(Duration::ZERO);
-    let secs = remaining.as_secs();
-    let timer_text = format!(" ⏱ {}s ", secs);
-    let timer_style = if secs <= 5 {
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    let timer = Paragraph::new(Line::from(Span::styled(timer_text, timer_style)))
-        .alignment(ratatui::layout::Alignment::Right);
-    frame.render_widget(timer, top_bottom[1]);
+    // Refresh countdown timer (only when auto-refresh is enabled)
+    if auto_refresh_secs > 0 {
+        let interval = Duration::from_secs(auto_refresh_secs);
+        let remaining = interval
+            .checked_sub(app.last_refresh.elapsed())
+            .unwrap_or(Duration::ZERO);
+        let secs = remaining.as_secs();
+        let timer_text = format!(" {} {}s ", '\u{23F1}', secs);
+        let timer_style = if secs <= 5 {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        let timer = Paragraph::new(Line::from(Span::styled(timer_text, timer_style)))
+            .alignment(ratatui::layout::Alignment::Right);
+        frame.render_widget(timer, top_bottom[1]);
+    }
 
     // Bottom row: area-specific actions
     let area_legend = Paragraph::new(Line::from(area_spans));
@@ -1847,8 +1852,11 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
                 Constraint::Length(1), // 15: multiplexer label
                 Constraint::Length(1), // 16: multiplexer toggle
                 Constraint::Length(1), // 17: spacing
-                Constraint::Length(1), // 18: template fields header
-                Constraint::Min(0),    // 19: template fields list + config path
+                Constraint::Length(1), // 18: refresh interval label
+                Constraint::Length(3), // 19: refresh interval input
+                Constraint::Length(1), // 20: spacing
+                Constraint::Length(1), // 21: template fields header
+                Constraint::Min(0),    // 22: template fields list + config path
             ])
             .split(inner);
 
@@ -1858,6 +1866,7 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
         let auto_open_pr_active = config_edit.active_field == 3;
         let session_active = config_edit.active_field == 4;
         let mux_active = config_edit.active_field == 5;
+        let refresh_active = config_edit.active_field == 6;
 
         // Verify command field
         let verify_label = Paragraph::new(Line::from(vec![Span::styled(
@@ -2096,6 +2105,48 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
         ]));
         frame.render_widget(mux_text, chunks[16]);
 
+        // Auto Refresh Interval field
+        let refresh_label = Paragraph::new(Line::from(vec![Span::styled(
+            "Auto Refresh Interval (seconds)",
+            Style::default()
+                .fg(if refresh_active {
+                    Color::Cyan
+                } else {
+                    Color::Gray
+                })
+                .add_modifier(Modifier::BOLD),
+        )]));
+        frame.render_widget(refresh_label, chunks[18]);
+
+        let refresh_border = if refresh_active {
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        let refresh_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(refresh_border)
+            .title(" Seconds ");
+        let refresh_spans = if config_edit.refresh_interval.is_empty() && !refresh_active {
+            vec![Span::styled(
+                "0 (disabled)",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD),
+            )]
+        } else {
+            text_input_spans(
+                &config_edit.refresh_interval,
+                text_style,
+                cursor_style,
+                refresh_active,
+            )
+        };
+        let refresh_text = Paragraph::new(Line::from(refresh_spans)).block(refresh_block);
+        frame.render_widget(refresh_text, chunks[19]);
+
         // Template fields header
         let fields_header = Paragraph::new(Line::from(vec![Span::styled(
             "Available template fields:",
@@ -2103,7 +2154,7 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
                 .fg(Color::Gray)
                 .add_modifier(Modifier::BOLD),
         )]));
-        frame.render_widget(fields_header, chunks[18]);
+        frame.render_widget(fields_header, chunks[21]);
 
         // Template fields list + config path in the remaining space
         let mut lines: Vec<Line> = Vec::new();
@@ -2174,7 +2225,7 @@ pub fn ui_configuration(frame: &mut Frame, app: &App) {
             ),
         ]));
         let fields_list = Paragraph::new(lines);
-        frame.render_widget(fields_list, chunks[19]);
+        frame.render_widget(fields_list, chunks[22]);
     }
 
     // Bottom hint bar

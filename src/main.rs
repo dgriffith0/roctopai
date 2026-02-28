@@ -43,7 +43,7 @@ use models::{
     AiSetupState, ConfigEditState, ConfirmAction, ConfirmModal, DepInstallConfirm, EditIssueModal,
     IssueEditResult, IssueModal, IssueSubmitResult, MergeStrategy, MessageLog, Mode,
     RepoSelectPhase, Screen, SectionData, SessionStates, StateFilter, TextInput,
-    WorktreeCreateResult, REFRESH_INTERVAL, SOCKET_PATH,
+    WorktreeCreateResult, SOCKET_PATH,
 };
 use session::{
     create_session_for_worktree, create_worktree_and_session, ensure_main_session,
@@ -152,9 +152,11 @@ fn main() -> Result<()> {
         })?;
 
         // Auto-refresh when interval has elapsed and on Board screen in Normal mode
-        if app.screen == Screen::Board
+        let auto_refresh_secs = config::get_auto_refresh_secs();
+        if auto_refresh_secs > 0
+            && app.screen == Screen::Board
             && app.mode == Mode::Normal
-            && app.last_refresh.elapsed() >= REFRESH_INTERVAL
+            && app.last_refresh.elapsed() >= Duration::from_secs(auto_refresh_secs)
             && !app.is_section_loading()
         {
             app.start_async_refresh();
@@ -317,8 +319,9 @@ fn main() -> Result<()> {
         let poll_timeout = if has_spinner {
             // Fast polling for spinner animation
             Duration::from_millis(100)
-        } else if app.screen == Screen::Board && app.mode == Mode::Normal {
-            let remaining = REFRESH_INTERVAL
+        } else if auto_refresh_secs > 0 && app.screen == Screen::Board && app.mode == Mode::Normal {
+            let interval = Duration::from_secs(auto_refresh_secs);
+            let remaining = interval
                 .checked_sub(app.last_refresh.elapsed())
                 .unwrap_or(Duration::ZERO);
             // Cap at 1 second so the countdown timer display stays current
@@ -528,7 +531,7 @@ fn main() -> Result<()> {
                                 app.screen = Screen::Board;
                             }
                             KeyCode::Tab => {
-                                config_edit.active_field = (config_edit.active_field + 1) % 6;
+                                config_edit.active_field = (config_edit.active_field + 1) % 7;
                             }
                             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                                 let verify_cmd =
@@ -575,6 +578,17 @@ fn main() -> Result<()> {
                                             .insert(repo.clone(), claude_cmd.clone());
                                     }
                                     config.multiplexer = Some(config_edit.multiplexer);
+                                    let refresh_val: u64 = config_edit
+                                        .refresh_interval
+                                        .value()
+                                        .trim()
+                                        .parse()
+                                        .unwrap_or(0);
+                                    config.auto_refresh_secs = if refresh_val == 0 {
+                                        None
+                                    } else {
+                                        Some(refresh_val)
+                                    };
                                     let _ = config::save_full_config(&config);
                                 }
 
@@ -587,30 +601,35 @@ fn main() -> Result<()> {
                                 0 => config_edit.verify_command.delete_back(),
                                 1 => config_edit.editor_command.delete_back(),
                                 4 => config_edit.session_command.delete_back(),
+                                6 => config_edit.refresh_interval.delete_back(),
                                 _ => {}
                             },
                             KeyCode::Left => match config_edit.active_field {
                                 0 => config_edit.verify_command.move_left(),
                                 1 => config_edit.editor_command.move_left(),
                                 4 => config_edit.session_command.move_left(),
+                                6 => config_edit.refresh_interval.move_left(),
                                 _ => {}
                             },
                             KeyCode::Right => match config_edit.active_field {
                                 0 => config_edit.verify_command.move_right(),
                                 1 => config_edit.editor_command.move_right(),
                                 4 => config_edit.session_command.move_right(),
+                                6 => config_edit.refresh_interval.move_right(),
                                 _ => {}
                             },
                             KeyCode::Home => match config_edit.active_field {
                                 0 => config_edit.verify_command.move_home(),
                                 1 => config_edit.editor_command.move_home(),
                                 4 => config_edit.session_command.move_home(),
+                                6 => config_edit.refresh_interval.move_home(),
                                 _ => {}
                             },
                             KeyCode::End => match config_edit.active_field {
                                 0 => config_edit.verify_command.move_end(),
                                 1 => config_edit.editor_command.move_end(),
                                 4 => config_edit.session_command.move_end(),
+                                6 => config_edit.refresh_interval.move_end(),
                                 _ => {}
                             },
                             KeyCode::Char(' ') | KeyCode::Enter
@@ -635,6 +654,7 @@ fn main() -> Result<()> {
                                 0 => config_edit.verify_command.insert(c),
                                 1 => config_edit.editor_command.insert(c),
                                 4 => config_edit.session_command.insert(c),
+                                6 if c.is_ascii_digit() => config_edit.refresh_interval.insert(c),
                                 _ => {}
                             },
                             _ => {}
@@ -1186,6 +1206,7 @@ fn main() -> Result<()> {
                                     let current_auto_open_pr = get_auto_open_pr(&app.repo);
                                     let current_claude =
                                         get_session_command(&app.repo).unwrap_or_default();
+                                    let current_refresh_secs = config::get_auto_refresh_secs();
                                     app.config_edit = Some(ConfigEditState::new(
                                         current_verify,
                                         current_editor,
@@ -1193,6 +1214,7 @@ fn main() -> Result<()> {
                                         current_auto_open_pr,
                                         current_claude,
                                         app.multiplexer,
+                                        current_refresh_secs,
                                     ));
                                     app.screen = Screen::Configuration;
                                 }
